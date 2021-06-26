@@ -145,6 +145,7 @@ void loop()
     correctionDisplay(cor);                                           //поправка на экране
     SendPacketToSerial(timeToString(starttime, startmillis), cor);    //время в сериал порт
     SendPacketToBluetooth(timeToString(starttime, startmillis), cor); //время в Bluetooth Serial
+    SendPacketToBLE(timeToString(starttime, startmillis), cor);       //время в BLE
     start = false;
 
     //ToDo: отправка времени старта в LoRa
@@ -299,6 +300,15 @@ void SendPacketToBluetooth(String time, int popr)
   }
 }
 
+void SendPacketToBLE(String time, int popr)
+{
+  if (popr < MAX_CORRECTION)
+  {
+    EventCharacteristic.setValue(String(START_HEADER + time + ";" + popr + PACKET_ENDER).c_str()); //время в BLE
+    EventCharacteristic.notify();
+  }
+}
+
 void SendPacketToLoRa(String time, int popr)
 {
   if (popr < MAX_CORRECTION)
@@ -315,10 +325,22 @@ void SendBeepToBluetooth(String time)
   SerialBT << BEEP_HEADER << time << PACKET_ENDER << endl;
 }
 
+void SendBeepToBLE(String time)
+{
+  EventCharacteristic.setValue(String(BEEP_HEADER + time + PACKET_ENDER).c_str());
+  EventCharacteristic.notify();
+}
+
 void SendVoiceToBluetooth(String time)
 {
   //if (SerialBT.connected)
   SerialBT << VOICE_HEADER << time << PACKET_ENDER << endl;
+}
+
+void SendVoiceToBLE(String time)
+{
+  EventCharacteristic.setValue(String(VOICE_HEADER + time + PACKET_ENDER).c_str());
+  EventCharacteristic.notify();
 }
 
 void BuzzerShort()

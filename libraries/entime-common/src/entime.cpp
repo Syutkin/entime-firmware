@@ -128,6 +128,15 @@ void batteryToTFT(uint8_t charge_y_tft, int32_t voltage, int16_t charge)
   }
 }
 
+void batteryToBLE(int32_t voltage, int16_t charge)
+{
+  if (charge < 0)
+    charge = 0;
+  uint8_t level = charge & (uint8_t)0xFF;
+  BatteryLevelCharacteristic.setValue(&level, 1);
+  BatteryLevelCharacteristic.notify();
+}
+
 void digitalClockTFTinit()
 {
   tft.setCursor(0, clock_y); //двоеточия у часов
@@ -703,6 +712,7 @@ void printVcc()
   uint32_t voltage = getVcc();
   int16_t charge = voltageToCharge(voltage);
   batteryToTFT(charge_y, voltage, charge);
+  batteryToBLE(voltage, charge);
   log_d("Voltage: %d, charge: %d", voltage, charge);
 }
 
@@ -860,6 +870,8 @@ void setupModule(String MODULE_NAME)
     Serial << "Bluetooth off" << endl;
     tft << "Bluetooth off" << endl;
   }
+
+  InitBLE(settings.Bluetooth.name + settings.Bluetooth.number);
 
   // настройка LoRa:
   // LoRa.setPins(ss, rst, dio0);

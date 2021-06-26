@@ -125,6 +125,7 @@ void loop()
     preveventmillis = eventmillis;
     SendPacketToSerial(timeToString(finishtime, finishmillis));
     SendPacketToSerialBT(timeToString(finishtime, finishmillis));
+    SendPacketToBLE(timeToString(finishtime, finishmillis));
     digitalFinishDisplay();
     finish = false;
     syncFromRTC();
@@ -233,4 +234,10 @@ void SendPacketToSerial(String time)
 void SendPacketToSerialBT(String time)
 {
   SerialBT << FINISH_HEADER << time << PACKET_ENDER << endl; //время в Bluetooth сериал
+}
+
+void SendPacketToBLE(String time)
+{
+  EventCharacteristic.setValue(String(FINISH_HEADER + time + PACKET_ENDER).c_str());
+  EventCharacteristic.notify();
 }

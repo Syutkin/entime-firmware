@@ -10,6 +10,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <Ticker.h>
+#include <ble.h>
 
 #define VERSION "BLE Edition 23/02/21"
 #define TIME_HEADER "T" // Header tag for serial time sync message
