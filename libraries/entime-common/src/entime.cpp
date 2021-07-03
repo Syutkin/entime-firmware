@@ -16,15 +16,16 @@ DS3232RTC myRTC(false); // tell constructor not to initialize the I2C bus.
 volatile time_t isrUTC;            //ISR's copy of current time in UTC
 volatile unsigned long syncmillis; // значение millis() которое было во время последней синхронизации (каждую секунду)
 
-//ToDo: define vSPI, not software SPI
 //define not needed for all pins if connected to VSPI; reference for ESP32 physical pins connections to VSPI:
-#define TFT_SCLK 15 //SCL  //SCK - CLK  // SPI `serial port clock - SPI clock input on Display module
-#define TFT_MOSI 4  //SDA  //SDA - DIN  // MISO - Master In Slave Out - SPI input on Display module
+// #define TFT_SCLK 15 //SCL  //SCK - CLK  // SPI `serial port clock - SPI clock input on Display module //hw 15 -> 5
+// #define TFT_MOSI 4  //SDA  //SDA - DIN  // MISO - Master In Slave Out - SPI input on Display module   //hw  4 -> 27
 #define TFT_CS 17   //CS   //CS - CS    // CS - Chip Select - SPI CS input on Display module
-#define TFT_RES 16  //RES  //RST- RST   // Reset (optional, -1 if unused)
-#define TFT_RS 2    //DC   //RS - D/C   // Data/Command
+#define TFT_RST 16  //RES  //RST- RST   // Reset (optional, -1 if unused)
+#define TFT_DC 2    //DC   //RS - D/C   // Data/Command
 //#define TFT_BACKLIGHT 47 // Display backlight pin
-Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_RS, TFT_MOSI, TFT_SCLK, TFT_RES);
+
+// Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_RS, TFT_MOSI, TFT_SCLK, TFT_RES);
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 
 const uint8_t charge_y = 146; //заряд
 
@@ -32,7 +33,7 @@ BluetoothSerial SerialBT;
 Preferences preferences;
 Settings settings;
 
-Ticker tickerVcc(printVcc, 5000);
+Ticker tickerVcc(printVcc, 60000);
 
 double v_divider;
 time_t last_rtc_syncdate;
