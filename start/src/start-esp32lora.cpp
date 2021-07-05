@@ -163,7 +163,7 @@ void loop()
 
 /* прерывание для установки времени старта */
 
-void setStart()
+void IRAM_ATTR setStart()
 {
   unsigned long ms = millis();
   // time_t st = getUTC();

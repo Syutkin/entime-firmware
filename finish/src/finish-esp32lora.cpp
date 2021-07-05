@@ -160,7 +160,7 @@ void loop()
   //printVcc();
 }
 
-void setfinish()
+void IRAM_ATTR setfinish()
 {
   /*
     time_t st = getUTC();

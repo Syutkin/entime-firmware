@@ -748,7 +748,7 @@ void setUTC(time_t utc)
   interrupts();
 }
 
-void incrementTime()
+void IRAM_ATTR incrementTime()
 {
   ++isrUTC;
   syncmillis = millis();
