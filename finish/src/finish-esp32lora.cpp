@@ -15,12 +15,8 @@
 #include <Arduino.h>
 #include <entime.h>
 
-// #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
-// #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
-// #endif
-
 /* настройки */
-const uint8_t EVENT_DELAY = 20; //количество миллисекунд между двумя отсечками
+const uint8_t EVENT_DELAY = 50; //количество миллисекунд между двумя отсечками
 const char MODULE_NUMBER = '1'; //номер в имени Bluetooth модуля //ToDo: сделать его настраиваемым
 const char FINISH_HEADER = 'F'; //первый байт финишного пакета
 const char PACKET_ENDER = '#';  //последний байт финишного пакета
@@ -51,7 +47,7 @@ volatile bool finish = false;           // был ли финиш
 String printfinish[5];
 
 // Прерывание для установки времени старта
-void setfinish();
+void setFinish();
 // Время финиша на экран
 void digitalFinishDisplay();
 // отправка финишного пакета в Serial
@@ -64,7 +60,8 @@ void SendPacketToBLE(String time);
 void setup()
 {
   pinMode(EVENT_PIN, INPUT_PULLUP);                                     // инициализируем пин, подключенный к кнопке, как
-  attachInterrupt(digitalPinToInterrupt(EVENT_PIN), setfinish, RISING); //прерывание для считывания показаний финиша
+  attachInterrupt(digitalPinToInterrupt(EVENT_PIN), setFinish, RISING); //прерывание для считывания показаний финиша
+  isInterruptAttached = true;
 
   setupModule(MODULE_NAME);
 
@@ -106,28 +103,36 @@ void loop()
     digitalClockTFT(t); //часы на экране
   }
 
-  // if (finish)
-  // {
-  //   if (eventmillis - preveventmillis > EVENT_DELAY)
-  //   {
-  //     preveventmillis = eventmillis;
-  //     SendPacketToSerial(TimeToString(finishtime, finishmillis));
-
-  //     //ToDo: время финиша в Bluetooth
-  //     SendPacketToSerialBT(TimeToString(finishtime, finishmillis));
-  //   }
-  //   digitalFinishDisplay();
-  //   finish = false;
-  // }
-
   if (finish)
   {
-    preveventmillis = eventmillis;
-    SendPacketToSerial(timeToString(finishtime, finishmillis));
-    SendPacketToSerialBT(timeToString(finishtime, finishmillis));
+    isInterruptAttached = false;
+    eventmillis = millis();
+    detachInterrupt(digitalPinToInterrupt(EVENT_PIN));
+    String finishTime = timeToString(finishtime, finishmillis);
+    SendPacketToSerial(finishTime);
+    SendPacketToSerialBT(finishTime);
     digitalFinishDisplay();
+
     finish = false;
     syncFromRTC();
+
+    //ToDo: отправка времени старта в LoRa
+    //Send LoRa packet to receiver
+    //LoRa.beginPacket();
+    //LoRa.print("hello!");
+    //LoRa.print(counter);
+    //LoRa.endPacket();
+
+    //SendPacketToLoRa(TimeToString(starttime, startmillis), cor);
+  }
+
+  if (!isInterruptAttached)
+  {
+    if (millis() - eventmillis > EVENT_DELAY)
+    {
+      attachInterrupt(digitalPinToInterrupt(EVENT_PIN), setFinish, RISING); //прерывание для считывания показаний старта
+      isInterruptAttached = true;
+    }
   }
 
   //ToDo: сделать реальный парсинг поступающего пакета
@@ -156,51 +161,17 @@ void loop()
   // }
 
   // get vcc from battery
-  // tickerVcc.update();
-  //printVcc();
+  tickerVcc.update();
 }
 
-void IRAM_ATTR setfinish()
+void IRAM_ATTR setFinish()
 {
-  /*
-    time_t st = getUTC();
-    unsigned long ms = millis();
-    finishtime = st;                             //ставим время старта
-    finishmillis = (ms - syncmillis);            //ставим время старта (тысячные секунд)
-    finish = true;
-  */
-
-  //  unsigned long ms = millis();
-  // time_t st = getUTC();
-  // if (st - starttime > 3)
-  // {                                  //ставим новое время старта, только если прошло более трёх секунд от предыдущего старта
-  //   starttime = st;                  //ставим время старта
-  //   startmillis = (ms - syncmillis); //ставим время старта (тысячные секунд)
-  //   start = true;
-  // }
-
-  if (!finish) // проверка, что предыдущее прерывание было обработано
+  if (!finish)
   {
-    // time_t ft = getUTC();
-    time_t ft = isrUTC;
-    unsigned long ms = millis();
-    if (ms - eventmillis > EVENT_DELAY)
-    {                                   //ставим новое время старта, только если прошло более трёх секунд от предыдущего старта
-      finishtime = ft;                  //ставим время старта
-      finishmillis = (ms - syncmillis); //ставим время старта (тысячные секунд)
-      eventmillis = ms;                 //ставим время события в millis
-      finish = true;
-    }
+    finishmillis = millis() - syncmillis;
+    finishtime = isrUTC;
+    finish = true;
   }
-
-  // проверяем, что предыдущее сообщение отправлено в bluetooth
-  // if (!finish)
-  // {
-  //   finishtime = getUTC();
-  //   eventmillis = millis();
-  //   finishmillis = (eventmillis - syncmillis);
-  //   finish = true;
-  // }
 }
 
 void digitalFinishDisplay()

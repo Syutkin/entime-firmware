@@ -9,6 +9,7 @@ const size_t json_capacity = 1024;
 
 const uint8_t EVENT_PIN(12);   // номер входа, подключенный к кнопке
 const uint8_t RTC_1HZ_PIN(13); // RTC provides a 1Hz interrupt signal on this pin
+bool isInterruptAttached = false;
 
 // For non-AVR boards only. Not needed for AVR boards.
 DS3232RTC myRTC(false); // tell constructor not to initialize the I2C bus.
@@ -58,9 +59,8 @@ String timeToString(time_t time)
 String timeToString(time_t time, int16_t millis)
 {
   if (millis > 999)
-  {               //надо бы половить дигитсы больше 999
-    millis = 999; //предположительно, если значение больше 999, то не изменилась секунда события (в противном случае обновились бы syncmillis)
-    log_w("Debug: millis > 999");
+  {             
+    millis = 999; //бывает 1000
   }
   char ch[13];
   sprintf(ch, "%.2d:%.2d:%.2d,%.3d",
@@ -818,7 +818,7 @@ void setupModule(String MODULE_NAME)
   tft << F(__DATE__ " " __TIME__) << endl;
   tft << endl;
 
-  delay(2000);
+  // delay(2000);
 
   tft << "Waiting for RTC..." << endl;
 
@@ -837,7 +837,7 @@ void setupModule(String MODULE_NAME)
   }
   tft << endl;
 
-  delay(2000);
+  // delay(2000);
 
   //ToDo: пока не выключать BT из настроек
   // if (settings.Bluetooth.active)
@@ -882,7 +882,7 @@ void setupModule(String MODULE_NAME)
   //   Serial.println("LoRa Initializing OK!");
   // }
 
-  delay(5000);
+  // delay(5000);
   tft.fillScreen(ST7735_BLACK); //clear display after initialization
 
   // настройки для показа VCC

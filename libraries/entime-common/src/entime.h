@@ -11,7 +11,7 @@
 #include <Preferences.h>
 #include <Ticker.h>
 
-#define VERSION "BLE Edition 23/02/21"
+#define VERSION "Summer 2021 Edit 6/07/21"
 #define TIME_HEADER "T" // Header tag for serial time sync message
 #define MODULE_TYPE "entime"
 
@@ -102,6 +102,8 @@ extern double v_divider;
 
 extern Ticker tickerVcc;
 
+extern bool isInterruptAttached; // выставлено ли прерывание по событию
+
 /*
  * Конвертирует время в строку
  */
@@ -163,7 +165,6 @@ String readBTSerial();
  * (Для совместимости в BTSerial)
  */
 String jsonToSettings(String json);
-
 
 /*
  * Настройки в Json строку
