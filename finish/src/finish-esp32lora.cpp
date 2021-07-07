@@ -40,8 +40,7 @@ const String MODULE_NAME = "Finish"; //имя Bluetooth модуля
 
 // переменные
 volatile unsigned long finishmillis;    // значение тысячных времени события по прерыванию (старта или финиша)
-volatile unsigned long eventmillis = 0; // значение millis() во время события по прерыванию (старта или финиша)
-unsigned long preveventmillis = 0;      // значение millis() во время предыдущего события по прерыванию (старта или финиша)
+unsigned long eventmillis = 0;          // значение millis() во время обработки события по прерыванию
 volatile time_t finishtime;             // время финиша
 volatile bool finish = false;           // был ли финиш
 String printfinish[5];
@@ -114,7 +113,7 @@ void loop()
     digitalFinishDisplay();
 
     finish = false;
-    syncFromRTC();
+    syncFromRTC(); //из-за этого костыля с синхронизацией, следующая отсечка может поступить только после смены секунды
 
     //ToDo: отправка времени старта в LoRa
     //Send LoRa packet to receiver

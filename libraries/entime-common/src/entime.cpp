@@ -818,7 +818,7 @@ void setupModule(String MODULE_NAME)
   tft << F(__DATE__ " " __TIME__) << endl;
   tft << endl;
 
-  // delay(2000);
+  delay(2000);
 
   tft << "Waiting for RTC..." << endl;
 
@@ -837,7 +837,7 @@ void setupModule(String MODULE_NAME)
   }
   tft << endl;
 
-  // delay(2000);
+  delay(2000);
 
   //ToDo: пока не выключать BT из настроек
   // if (settings.Bluetooth.active)
@@ -882,7 +882,7 @@ void setupModule(String MODULE_NAME)
   //   Serial.println("LoRa Initializing OK!");
   // }
 
-  // delay(5000);
+  delay(5000);
   tft.fillScreen(ST7735_BLACK); //clear display after initialization
 
   // настройки для показа VCC
