@@ -796,7 +796,7 @@ void setupModule(String MODULE_NAME)
 
   pinMode(RTC_1HZ_PIN, INPUT_PULLUP); // enable pullup on interrupt pin (RTC SQW pin is open drain)
   attachInterrupt(digitalPinToInterrupt(RTC_1HZ_PIN), incrementTime, FALLING);
-  myRTC.squareWave(SQWAVE_1_HZ); // 1 Hz square wave
+  myRTC.squareWave(DS3232RTC::SQWAVE_1_HZ); // 1 Hz square wave
 
   loadSettings(MODULE_NAME);
 
