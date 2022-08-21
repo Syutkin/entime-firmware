@@ -1,12 +1,11 @@
 /*
 Модуль для работы с отсечкой старта
-  Версия 18/03/2021 "BLE эдишн"
+  Версия 21/08/2022
   Реализовано:
     Основная борда ESP32 + LoRa
     Модуль RTC (DS3231)
     Дисплей (ST7735)
     Время cтарта передаётся по Bluetooth
-    Время cтарта передаётся по BLE
     Пищалка
     ReadVcc
   В процессе:
@@ -26,7 +25,7 @@ const uint16_t MAX_CORRECTION = 10000;
 const uint8_t EVENT_DELAY = 2; //сколько секунд между двумя отсечками
 
 /* положение информации на экране */
-//const uint8_t clock_y = 0;              //часы
+// const uint8_t clock_y = 0;              //часы
 const uint8_t countdown_y = 30;         //обратный отсчёт
 const uint8_t countdown_x = 70;         //обратный отсчёт
 const uint8_t correction_y = 78;        //поправка
@@ -40,9 +39,9 @@ const String MODULE_NAME = "Start"; //имя Bluetooth модуля
 // #define BUZZER_CHANNEL 0
 
 #define R1 4733 //резисторы в делителе напряжения
-//start1 - 4733
-//start2 - 4722
-//start3 - 4646
+// start1 - 4733
+// start2 - 4722
+// start3 - 4646
 #define R2 1000
 
 // define the pins used by the transceiver module
@@ -51,15 +50,7 @@ const String MODULE_NAME = "Start"; //имя Bluetooth модуля
 #define dio0 26
 
 /* переменные */
-int cor;                          // поправка, которая выводится на экран
-volatile uint16_t startmillis;    // значение тысячных времени события по прерыванию (старта или финиша)
-volatile time_t starttime;        // время старта
-time_t prevstarttime = 0;             // предыдущее время старта
-volatile bool start = false;      // был ли старт
-// bool isInterruptAttached = false; // выставлено ли прерывание по событию
-
-// For non-AVR boards only. Not needed for AVR boards.
-// DS3232RTC myRTC(false); // tell constructor not to initialize the I2C bus.
+int cor; // поправка, которая выводится на экран
 
 void setStart();
 void countdown(time_t t);
@@ -93,15 +84,11 @@ void printTftCountdown(String cd);
 
 void setup()
 {
-  pinMode(EVENT_PIN, INPUT_PULLUP);                                    //инициализируем пин, подключенный к кнопке, как вход
-  attachInterrupt(digitalPinToInterrupt(EVENT_PIN), setStart, RISING); //прерывание для считывания показаний старта
-  isInterruptAttached = true;
-
   setupModule(MODULE_NAME);
 
   /* приведение вида стартового экрана в рабочее состояние */
   digitalStartDisplay("00:00:00"); //время старта на экране
-  correctionDisplay(0);  //поправка на экране
+  correctionDisplay(0);            //поправка на экране
   digitalClockTFTinit();
 }
 
@@ -137,52 +124,42 @@ void loop()
     countdown(t);
   }
 
-  if (start)
+  if (isEvent)
   {
-    isInterruptAttached = false;
-    detachInterrupt(digitalPinToInterrupt(EVENT_PIN));
-    String startTime = timeToString(starttime, startmillis);
+    time_t rtcTime = myRTC.get();
+    Serial << timeToString(rtcTime) << ";" << timeToString(eventTime) << ";" << timeToString(eventMillis) << endl;
+    // isInterruptAttached = false;
+    // detachInterrupt(digitalPinToInterrupt(EVENT_PIN));
+    String startTime = timeToString(eventTime, eventMillis);
     digitalStartDisplay(startTime); //время старта на экране
-    cor = getCorrection(starttime, startmillis);
+    cor = getCorrection(eventTime, eventMillis);
     correctionDisplay(cor);
     SendPacketToSerial(startTime, cor);    //время в сериал порт
     SendPacketToBluetooth(startTime, cor); //время в Bluetooth Serial
 
-    //ToDo: отправка времени старта в LoRa
-    //Send LoRa packet to receiver
-    //LoRa.beginPacket();
-    //LoRa.print("hello!");
-    //LoRa.print(counter);
-    //LoRa.endPacket();
+    // ToDo: отправка времени старта в LoRa
+    // Send LoRa packet to receiver
+    // LoRa.beginPacket();
+    // LoRa.print("hello!");
+    // LoRa.print(counter);
+    // LoRa.endPacket();
 
-    //SendPacketToLoRa(TimeToString(starttime, startmillis), cor);
+    // SendPacketToLoRa(TimeToString(starttime, startmillis), cor);
 
-    start = false;
+    isEvent = false;
   }
 
-  if (!isInterruptAttached)
-  {
-    if (t - starttime > EVENT_DELAY)
-    {
-      attachInterrupt(digitalPinToInterrupt(EVENT_PIN), setStart, RISING); //прерывание для считывания показаний старта
-      isInterruptAttached = true;
-    }
-  }
+  // if (!isInterruptAttached)
+  // {
+  //   if (t - starttime > EVENT_DELAY)
+  //   {
+  //     attachInterrupt(digitalPinToInterrupt(EVENT_PIN), setStart, RISING); //прерывание для считывания показаний старта
+  //     isInterruptAttached = true;
+  //   }
+  // }
 
   // get vcc from battery
   tickerVcc.update();
-}
-
-/* прерывание для установки времени старта */
-
-void IRAM_ATTR setStart()
-{
-  if (!start)
-  {
-    startmillis = millis() - syncmillis;
-    starttime = isrUTC;
-    start = true;
-  }
 }
 
 /* обратный отсчёт */
@@ -292,21 +269,21 @@ void SendPacketToLoRa(String time, int popr)
 {
   if (popr < MAX_CORRECTION)
   {
-    //LoRa.beginPacket();
-    //LoRa << START_HEADER << time << ";" << popr << PACKET_ENDER; //время в LoRa
-    //LoRa.endPacket();
+    // LoRa.beginPacket();
+    // LoRa << START_HEADER << time << ";" << popr << PACKET_ENDER; //время в LoRa
+    // LoRa.endPacket();
   }
 }
 
 void SendBeepToBluetooth(String time)
 {
-  //if (SerialBT.connected())
+  // if (SerialBT.connected())
   SerialBT << BEEP_HEADER << time << PACKET_ENDER << endl;
 }
 
 void SendVoiceToBluetooth(String time)
 {
-  //if (SerialBT.connected)
+  // if (SerialBT.connected)
   SerialBT << VOICE_HEADER << time << PACKET_ENDER << endl;
 }
 

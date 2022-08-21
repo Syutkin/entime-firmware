@@ -1,6 +1,6 @@
 #pragma once
 #include <Arduino.h>
-// #include <Streaming.h>
+#include <Streaming.h>
 #include <Ticker.h>
 
 #include "battery.h"

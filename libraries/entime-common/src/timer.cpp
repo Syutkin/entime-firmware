@@ -1,44 +1,58 @@
 #include "timer.h"
 #include "settings.h"
 
+//ToDo: move pins to GPIO32-GPIO39
 const uint8_t EVENT_PIN(12);   // номер входа, подключенный к кнопке
 const uint8_t RTC_1HZ_PIN(13); // RTC provides a 1Hz interrupt signal on this pin
-bool isInterruptAttached = false;
 
 // For non-AVR boards only. Not needed for AVR boards.
 DS3232RTC myRTC(false); // tell constructor not to initialize the I2C bus.
 
-volatile time_t isrUTC;            //ISR's copy of current time in UTC
-volatile unsigned long syncmillis; // значение millis() которое было во время последней синхронизации (каждую секунду)
+volatile time_t isrUTC;                   //ISR's copy of current time in UTC
+volatile unsigned long isrSyncMillis;     // значение millis() которое было во время последней синхронизации (каждую секунду)
+volatile bool isEvent = false;            // было ли внешнее прерывание по событию
+volatile unsigned long eventMillis = 0;   // значение millis() во время обработки события по прерыванию
+volatile time_t eventTime = 0;      
 
-time_t getUTC()
+void initTimer()
 {
-  // noInterrupts();
-  // time_t utc = isrUTC;
-  // interrupts();
-  // return utc;
-  return isrUTC;
+  myRTC.begin(); // initialize the I2C bus here.
+  pinMode(RTC_1HZ_PIN, INPUT_PULLUP); // enable pullup on interrupt pin (RTC SQW pin is open drain)
+  attachInterrupt(digitalPinToInterrupt(RTC_1HZ_PIN), handleIncrementTime, FALLING);
+  myRTC.squareWave(DS3232RTC::SQWAVE_1_HZ); // 1 Hz square wave
+
+  pinMode(EVENT_PIN, INPUT_PULLUP);                                    //инициализируем пин, подключенный к кнопке, как вход
+  attachInterrupt(digitalPinToInterrupt(EVENT_PIN), handleEvent, RISING); //прерывание для считывания времени события 
 }
 
-time_t getUTCNoInterrupts()
-{
-  noInterrupts();
-  time_t utc = isrUTC;
-  interrupts();
-  return utc;
-}
+// time_t IRAM_ATTR getUTC()
+// {
+//   // noInterrupts();
+//   // time_t utc = isrUTC;
+//   // interrupts();
+//   // return utc;
+//   return isrUTC;
+// }
 
-void setUTC(time_t utc)
+// time_t getUTCNoInterrupts()
+// {
+//   noInterrupts();
+//   time_t utc = isrUTC;
+//   interrupts();
+//   return utc;
+// }
+
+void IRAM_ATTR setUTC(time_t utc)
 {
   noInterrupts();
   isrUTC = utc;
   interrupts();
 }
 
-void IRAM_ATTR incrementTime()
+void IRAM_ATTR handleIncrementTime()
 {
   ++isrUTC;
-  syncmillis = millis();
+  isrSyncMillis = millis();
 }
 
 void syncRTCfromSerial()
@@ -60,10 +74,13 @@ void syncRTCfromSerial()
 
 void syncFromRTC()
 {
-  time_t utc = getUTCNoInterrupts(); // synchronize with RTC
-  while (utc == getUTCNoInterrupts())
+  noInterrupts();
+  // time_t utc = getUTCNoInterrupts(); // synchronize with RTC
+  time_t utc = isrUTC; // synchronize with RTC
+  while (utc == isrUTC)
     ;                // wait for increment to the next second
   utc = myRTC.get(); // get the time from the RTC
+  interrupts();
   setUTC(utc);       // set our time to the RTC's time
   Serial << "RTC: Module time synced from RTC" << endl;
 }
@@ -83,4 +100,14 @@ unsigned long processSyncMessage()
     }
   }
   return pctime;
+}
+
+void IRAM_ATTR handleEvent()
+{
+  if (!isEvent)
+  {
+    eventMillis = millis() - isrSyncMillis;
+    eventTime = isrUTC;
+    isEvent = true;
+  }
 }

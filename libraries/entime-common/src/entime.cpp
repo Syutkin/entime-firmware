@@ -13,11 +13,8 @@ void printVcc()
 void setupModule(String MODULE_NAME)
 {
   Serial.begin(57600);
-  myRTC.begin(); // initialize the I2C bus here.
 
-  pinMode(RTC_1HZ_PIN, INPUT_PULLUP); // enable pullup on interrupt pin (RTC SQW pin is open drain)
-  attachInterrupt(digitalPinToInterrupt(RTC_1HZ_PIN), incrementTime, FALLING);
-  myRTC.squareWave(DS3232RTC::SQWAVE_1_HZ); // 1 Hz square wave
+  initTimer();
 
   loadSettings(MODULE_NAME);
 
@@ -44,7 +41,9 @@ void setupModule(String MODULE_NAME)
   tft << "Waiting for RTC..." << endl;
 
   syncFromRTC();
-  time_t t = getUTC();
+  
+  // time_t t = getUTC();
+  time_t t = isrUTC;
   char buf1[20];
   sprintf(buf1, "%02d:%02d:%02d %02d/%02d/%02d", hour(t), minute(t), second(t), day(t), month(t), year(t));
 

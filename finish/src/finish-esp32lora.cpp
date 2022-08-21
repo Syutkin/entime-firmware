@@ -39,10 +39,10 @@ const String MODULE_NAME = "Finish"; //имя Bluetooth модуля
 #define dio0 26
 
 // переменные
-volatile unsigned long finishmillis;    // значение тысячных времени события по прерыванию (старта или финиша)
-unsigned long eventmillis = 0;          // значение millis() во время обработки события по прерыванию
-volatile time_t finishtime;             // время финиша
-volatile bool finish = false;           // был ли финиш
+// volatile unsigned long finishmillis;    // значение тысячных времени события по прерыванию (старта или финиша)
+// unsigned long eventmillis = 0;          // значение millis() во время обработки события по прерыванию
+// volatile time_t finishtime;             // время финиша
+// volatile bool finish = false;           // был ли финиш
 String printfinish[5];
 
 // Прерывание для установки времени старта
@@ -58,9 +58,9 @@ void SendPacketToBLE(String time);
 
 void setup()
 {
-  pinMode(EVENT_PIN, INPUT_PULLUP);                                     // инициализируем пин, подключенный к кнопке, как
-  attachInterrupt(digitalPinToInterrupt(EVENT_PIN), setFinish, RISING); //прерывание для считывания показаний финиша
-  isInterruptAttached = true;
+  // pinMode(EVENT_PIN, INPUT_PULLUP);                                     // инициализируем пин, подключенный к кнопке, как
+  // attachInterrupt(digitalPinToInterrupt(EVENT_PIN), setFinish, RISING); //прерывание для считывания показаний финиша
+  // isInterruptAttached = true;
 
   setupModule(MODULE_NAME);
 
@@ -163,15 +163,15 @@ void loop()
   tickerVcc.update();
 }
 
-void IRAM_ATTR setFinish()
-{
-  if (!finish)
-  {
-    finishmillis = millis() - syncmillis;
-    finishtime = isrUTC;
-    finish = true;
-  }
-}
+// void IRAM_ATTR setFinish()
+// {
+//   if (!finish)
+//   {
+//     finishmillis = millis() - isrSyncMillis;
+//     finishtime = isrUTC;
+//     finish = true;
+//   }
+// }
 
 void digitalFinishDisplay()
 {
