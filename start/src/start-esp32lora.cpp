@@ -117,7 +117,7 @@ void loop()
     String data = readBTSerial();
     if (!data.isEmpty())
     {
-      String json = jsonToSettings(data);
+      String json = jsonToSettings(data, MODULE_TYPE);
       if (!json.isEmpty())
       {
         SerialBT.println(json);
