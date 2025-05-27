@@ -1,0 +1,14 @@
+{
+    "cSpell.words": [
+        "Adafruit",
+        "Datime",
+        "MOSI",
+        "OLED",
+        "RSSI",
+        "SCLK",
+        "VSPI"
+    ],
+    "files.associations": {
+        "exception": "cpp"
+    }
+}
