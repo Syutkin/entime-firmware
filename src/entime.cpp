@@ -80,7 +80,7 @@ void onSecond()
 void ntpError()
 {
     Serial << "NTP Error: " << NTP.readError() << endl;
-    String online = NTP.online() ? "bool" : "false";
+    String online = NTP.online() ? "true" : "false";
     Serial << "online: ";
     Serial << online << endl;
     TFT.drawSignal(NTP.online(), WiFi.status(), WiFi.RSSI());
