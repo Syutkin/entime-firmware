@@ -2,6 +2,21 @@
 #include "icons.h"
 #include <Fonts/FreeMono9pt7b.h>
 
+// Где расположен topbar
+#define TOPBAR_Y 0
+
+// Где расположены часы
+#define CLOCK_X 0
+
+// Где расположена иконка Bluetooth
+#define BLUETOOTH_X 80
+
+// Где расположена иконка WiFi
+#define SIGNAL_X 96
+
+// Где расположена иконка батареи
+#define BATTERY_X 112
+
 // More colors
 #define ST7735_GRAY 0x8410
 
@@ -11,7 +26,7 @@ GFXcanvas16 icon_canvas(ICON_WIDTH, ICON_HEIGHT);
 
 TFT_LCD::TFT_LCD()
 {
-    ST7735.initR(INITR_GREENTAB); // инициализируем дисплей ST7735, у GREENTAB правильные корректировки:
+    ST7735.initR(INITR_GREENTAB); // инициализируем дисплей ST7735, у GREENTAB правильные координаты:
                                   // _colstart = 2; _rowstart = 1;
     ST7735.setRotation(0);
     uint8_t data = 0xC0;

@@ -15,21 +15,6 @@
 #define TFT_DC 2   // DC   //RS - D/C   // Data/Command
 // #define TFT_BACKLIGHT 47 // Display backlight pin
 
-// Где расположен topbar
-#define TOPBAR_Y 0
-
-// Где расположены часы
-#define CLOCK_X 0
-
-// Где расположена иконка Bluetooth
-#define BLUETOOTH_X 80
-
-// Где расположена иконка WiFi
-#define SIGNAL_X 96
-
-// Где расположена иконка батареи
-#define BATTERY_X 112
-
 class TFT_LCD
 {
 public:
