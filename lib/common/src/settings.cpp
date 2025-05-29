@@ -5,8 +5,7 @@
 Preferences preferences;
 Settings settings;
 
-String fromJson(String json);
-String toJson();
+
 
 String fromJson(String json)
 {

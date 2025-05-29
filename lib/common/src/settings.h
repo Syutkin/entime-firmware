@@ -68,5 +68,8 @@ typedef struct
   S_VCC VCC;
 } Settings;
 
+String fromJson(String json);
+String toJson();
+
 // extern Preferences preferences;
 extern Settings settings;

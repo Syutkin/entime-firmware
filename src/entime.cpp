@@ -2,9 +2,10 @@
 #include <Streaming.h>
 #include <GyverNTP.h>
 #include <GyverDS3231Min.h>
-#include <BluetoothSerial.h>
+
 #include "tft_lcd.h"
 #include "wifi_helper.h"
+#include "bluetooth_helper.h"
 
 // Check if Bluetooth is available
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
@@ -17,8 +18,6 @@
 #endif
 
 GyverDS3231Min rtc;
-BluetoothSerial SerialBT;
-String myName = "ESP32-BT-Master";
 
 // обработчик событий WiFi
 void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
@@ -35,16 +34,24 @@ void setup()
 
     TFT.begin();
 
-    if (settings.WiFi.ssid)
+    // обработчик событий от WiFi
+    WiFi.onEvent(WiFiEvent);
+    // Set WiFi to station mode and disconnect from an AP if it was previously connected.
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+
+    Serial << "settings ssid: |" << settings.WiFi.ssid << "|" << endl;
+    if (!settings.WiFi.ssid.isEmpty())
     {
         Serial << "Setup WiFi" << endl;
         // настройка wifi
-        setupWiFi();
+        // setupWiFi();
+        WiFi.scanNetworks();
     }
     else
     {
-        Serial << "Start Bluetooth" << endl;
-        SerialBT.begin(myName);
+        WiFi.disconnect(true, false);
+        BT.begin();
     }
 
     // обработчик ошибок NTP
@@ -95,6 +102,9 @@ void loop()
         Serial << "NTP status changed: ";
         Serial << NTP.online() << endl;
     }
+
+    // reading from bluetooth serial;
+    BT.read();
 }
 
 void onSecond()
