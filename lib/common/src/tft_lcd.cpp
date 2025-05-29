@@ -39,7 +39,23 @@ void TFT_LCD::drawBattery(uint8_t charge)
 {
     icon_canvas.fillScreen(ST7735_BLACK);
     icon_canvas.setCursor(0, 0);
-    icon_canvas.drawBitmap(0, 0, battery_high, ICON_WIDTH, ICON_HEIGHT, ST7735_WHITE);
+
+    if (charge < 10)
+    {
+        icon_canvas.drawBitmap(0, 0, battery_outline, ICON_WIDTH, ICON_HEIGHT, ST7735_RED);
+    }
+    else if (charge < 40)
+    {
+        icon_canvas.drawBitmap(0, 0, battery_low, ICON_WIDTH, ICON_HEIGHT, ST7735_WHITE);
+    }
+    else if (charge < 70)
+    {
+        icon_canvas.drawBitmap(0, 0, battery_medium, ICON_WIDTH, ICON_HEIGHT, ST7735_WHITE);
+    }
+    else
+    {
+        icon_canvas.drawBitmap(0, 0, battery_high, ICON_WIDTH, ICON_HEIGHT, ST7735_WHITE);
+    }
     ST7735.drawRGBBitmap(BATTERY_X, TOPBAR_Y, icon_canvas.getBuffer(), icon_canvas.width(), icon_canvas.height());
 }
 
@@ -81,11 +97,22 @@ void TFT_LCD::drawSignal(bool ntpOnline, wl_status_t wifi_status, int32_t rssi)
     ST7735.drawRGBBitmap(SIGNAL_X, TOPBAR_Y, icon_canvas.getBuffer(), icon_canvas.width(), icon_canvas.height());
 }
 
-void TFT_LCD::drawBluetooth()
+void TFT_LCD::drawBluetooth(bool isAvailable, bool hasClients)
 {
     icon_canvas.fillScreen(ST7735_BLACK);
     icon_canvas.setCursor(0, 0);
-    icon_canvas.drawBitmap(0, 0, bluetooth, ICON_WIDTH, ICON_HEIGHT, ST7735_BLUE);
+    if (!isAvailable)
+    {
+        icon_canvas.drawBitmap(0, 0, bluetooth_off, ICON_WIDTH, ICON_HEIGHT, ST7735_GRAY);
+    }
+    else if (!hasClients)
+    {
+        icon_canvas.drawBitmap(0, 0, bluetooth, ICON_WIDTH, ICON_HEIGHT, ST7735_WHITE);
+    }
+    else
+    {
+        icon_canvas.drawBitmap(0, 0, bluetooth_connect, ICON_WIDTH, ICON_HEIGHT, ST7735_BLUE);
+    }
     ST7735.drawRGBBitmap(BLUETOOTH_X, TOPBAR_Y, icon_canvas.getBuffer(), icon_canvas.width(), icon_canvas.height());
 }
 
@@ -95,5 +122,5 @@ void TFT_LCD::drawClock(Datime dt)
     char str[9];
     sprintf(str, "%.2d:%.2d:%.2d", dt.hour, dt.minute, dt.second);
     ST7735.setCursor(CLOCK_X + 8, TOPBAR_Y + 8);
-    ST7735.print(str);
+    ST7735 << str;
 }

@@ -15,23 +15,13 @@ void setupWiFi()
 
 void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info)
 {
+    bool noNetwork = true;
     switch (event)
     {
     case ARDUINO_EVENT_WIFI_READY:
         break;
     case ARDUINO_EVENT_WIFI_SCAN_DONE:
-        Serial.println("WiFi: Completed scan for access points");
-        Serial << "Found " << info.wifi_scan_done.number << " nets" << endl;
-        for (int i = 0; i < info.wifi_scan_done.number; ++i)
-        {
-            Serial << i + 1 << ":" << endl;
-            Serial << "SSID: " << WiFi.SSID(i) << " RSSI: " << WiFi.RSSI(i) << endl;
-            if (WiFi.SSID(i) = settings.WiFi.ssid)
-            {
-                WiFi.begin(settings.WiFi.ssid, settings.WiFi.passwd);
-            }
-        }
-        break;
+         break;
     case ARDUINO_EVENT_WIFI_STA_START:
         break;
     case ARDUINO_EVENT_WIFI_STA_STOP:
@@ -42,10 +32,12 @@ void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info)
         switch (info.wifi_sta_disconnected.reason)
         {
         case WIFI_REASON_HANDSHAKE_TIMEOUT:
-            WiFi.disconnect();
+            WiFi.disconnect(true, false);
+            BT.begin();
             break;
         case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
-            WiFi.disconnect();
+            WiFi.disconnect(true, false);
+            BT.begin();
             break;
         default:
             break;

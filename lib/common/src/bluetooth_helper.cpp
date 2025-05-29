@@ -5,10 +5,10 @@ BT_SERIAL BT;
 
 String myName = "ESP32-BT-Master";
 
-void BT_SERIAL::begin()
+bool BT_SERIAL::begin()
 {
         Serial << "Start Bluetooth" << endl;
-        serial.begin(myName);
+        return serial.begin(myName);
 }
 
 void BT_SERIAL::read()

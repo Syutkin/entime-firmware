@@ -68,6 +68,7 @@ typedef struct
   S_VCC VCC;
 } Settings;
 
+void loadSettings(String MODULE_NAME);
 String fromJson(String json);
 String toJson();
 

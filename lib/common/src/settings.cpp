@@ -5,7 +5,63 @@
 Preferences preferences;
 Settings settings;
 
+void loadSettings(String MODULE_NAME)
+{
+    Serial << "Settings: Loading..." << endl;
 
+    preferences.begin("Bluetooth", false);
+    settings.Bluetooth.active = preferences.getBool("active", true);
+    settings.Bluetooth.name = preferences.getString("name", "FR-" + MODULE_NAME + "-"); // имя Bluetooth модуля
+    settings.Bluetooth.number = preferences.getUShort("number", 1);                     // номер в имени Bluetooth модуля
+    preferences.end();
+
+    preferences.begin("Time", false);
+    settings.Time.timezone = preferences.getUShort("timezone", 3); // Europe/Moscow UTC+3
+    preferences.end();
+
+    preferences.begin("LoRa", false);
+    settings.LoRa.active = preferences.getBool("active", false);
+    settings.LoRa.frequency = preferences.getInt("frequency", 433E6);
+    settings.LoRa.txPower = preferences.getUShort("txPower", 20);
+    settings.LoRa.spreadingFactor = preferences.getUShort("spreadingFactor", 12);
+    settings.LoRa.signalBandwidth = preferences.getInt("signalBandwidth", 125E3);
+    settings.LoRa.codingRateDenom = preferences.getUShort("codingRateDenom", 5);
+    settings.LoRa.preambleLength = preferences.getUShort("preambleLength", 8);
+    settings.LoRa.syncWord = preferences.getChar("syncWord", 0x12);
+    settings.LoRa.crc = preferences.getBool("crc", false);
+    preferences.end();
+
+    preferences.begin("WiFi", false);
+    settings.WiFi.active = preferences.getBool("active", false);
+    settings.WiFi.ssid = preferences.getString("ssid", "");
+    settings.WiFi.passwd = preferences.getString("passwd", "");
+    preferences.end();
+
+    preferences.begin("TFT", false);
+    settings.TFT.active = preferences.getBool("active", true);
+    settings.TFT.timeout = preferences.getBool("timeout", false);
+    settings.TFT.timeoutDuration = preferences.getUShort("timeoutDuration", 5);
+    settings.TFT.turnOnAtEvent = preferences.getBool("turnOnAtEvent", false);
+    preferences.end();
+
+    preferences.begin("Buzzer", false);
+    settings.Buzzer.active = preferences.getBool("active", true);
+    settings.Buzzer.shortFrequency = preferences.getUShort("shortFrequency", 659);
+    settings.Buzzer.longFrequency = preferences.getUShort("longFrequency", 659);
+    preferences.end();
+
+    preferences.begin("VCC", false);
+    settings.VCC.r1 = preferences.getUShort("r1", 4700);
+    settings.VCC.r2 = preferences.getUShort("r2", 1000);
+    // settings.VCC.vbat = preferences.getUShort("vbat");
+    preferences.end();
+
+    //   preferences.begin("Misc", false);
+    //   last_rtc_syncdate = preferences.getInt("syncDate", 0);
+    //   preferences.end();
+
+    Serial << "Settings: Loaded" << endl;
+}
 
 String fromJson(String json)
 {
@@ -24,7 +80,7 @@ String fromJson(String json)
         log_e("deserializeJson(): no enough memory to store the entire document");
         return result;
     }
-    
+
     if (doc["Read"].is<bool>())
     {
         bool Read = doc["Read"];
@@ -238,9 +294,9 @@ String fromJson(String json)
                 }
                 if (jWiFi["passwd"].is<String>())
                 {
+                    s_wifi.passwd = jWiFi["passwd"].as<String>();
                     if (s_wifi.passwd != settings.WiFi.passwd)
                     {
-                        s_wifi.passwd = jWiFi["passwd"].as<String>();
                         preferences.putString("passwd", s_wifi.passwd);
                         // settings.WiFi.passwd = preferences.getString("passwd");
                         log_i("WiFi new password set");

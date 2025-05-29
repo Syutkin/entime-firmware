@@ -13,7 +13,7 @@ private:
 
 public:
     BluetoothSerial serial;
-    void begin();
+    bool begin();
     void read();
 };
 

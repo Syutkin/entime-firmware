@@ -23,7 +23,7 @@ public:
     void begin();
     void drawBattery(uint8_t charge);
     void drawSignal(bool ntpOnline, wl_status_t wifi_status, int32_t rssi);
-    void drawBluetooth();
+    void drawBluetooth(bool isAvailable, bool hasClients);
     void drawClock(Datime dt);
 };
 

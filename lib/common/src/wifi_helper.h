@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <Streaming.h>
 #include "settings.h"
+#include "bluetooth_helper.h"
 
 void setupWiFi();
 
