@@ -3,6 +3,7 @@
 #define _WIFI_HELPER_H
 #include <WiFi.h>
 #include <Streaming.h>
+#include "settings.h"
 
 void setupWiFi();
 

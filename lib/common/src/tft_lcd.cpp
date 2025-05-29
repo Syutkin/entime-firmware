@@ -20,11 +20,11 @@
 // More colors
 #define ST7735_GRAY 0x8410
 
-TFT_LCD TFT = TFT_LCD();
+TFT_LCD TFT;
 
 GFXcanvas16 icon_canvas(ICON_WIDTH, ICON_HEIGHT);
 
-TFT_LCD::TFT_LCD()
+void TFT_LCD::begin()
 {
     ST7735.initR(INITR_GREENTAB); // инициализируем дисплей ST7735, у GREENTAB правильные координаты:
                                   // _colstart = 2; _rowstart = 1;
@@ -92,7 +92,6 @@ void TFT_LCD::drawBluetooth()
 void TFT_LCD::drawClock(Datime dt)
 {
     ST7735.setTextColor(ST7735_WHITE, ST7735_BLACK);
-    // ST7735.fillRect(CLOCK_X, TOPBAR_Y, ICON_WIDTH * 5, ICON_HEIGHT, ST7735_BLACK);
     char str[9];
     sprintf(str, "%.2d:%.2d:%.2d", dt.hour, dt.minute, dt.second);
     ST7735.setCursor(CLOCK_X + 8, TOPBAR_Y + 8);

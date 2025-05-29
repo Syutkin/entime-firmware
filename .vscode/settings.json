@@ -13,6 +13,8 @@
         "VSPI"
     ],
     "files.associations": {
-        "exception": "cpp"
+        "exception": "cpp",
+        "fstream": "cpp",
+        "sstream": "cpp"
     }
 }

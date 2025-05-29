@@ -2,14 +2,28 @@
 #include <Streaming.h>
 #include <GyverNTP.h>
 #include <GyverDS3231Min.h>
+#include <BluetoothSerial.h>
 #include "tft_lcd.h"
 #include "wifi_helper.h"
 
-GyverDS3231Min rtc;
+// Check if Bluetooth is available
+#if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+#error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
+#endif
 
-// События WiFi
+// Check Serial Port Profile
+#if !defined(CONFIG_BT_SPP_ENABLED)
+#error Serial Port Profile for Bluetooth is not available or not enabled. It is only available for the ESP32 chip.
+#endif
+
+GyverDS3231Min rtc;
+BluetoothSerial SerialBT;
+String myName = "ESP32-BT-Master";
+
+// обработчик событий WiFi
 void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
 
+// обработчик ошибок NTP
 void ntpError();
 
 // Вызов каждую секунду
@@ -19,8 +33,19 @@ void setup()
 {
     Serial.begin(57600);
 
-    // настройка wifi
-    setupWiFi();
+    TFT.begin();
+
+    if (settings.WiFi.ssid)
+    {
+        Serial << "Setup WiFi" << endl;
+        // настройка wifi
+        setupWiFi();
+    }
+    else
+    {
+        Serial << "Start Bluetooth" << endl;
+        SerialBT.begin(myName);
+    }
 
     // обработчик ошибок NTP
     NTP.onError(ntpError);
@@ -51,7 +76,7 @@ void setup()
 
     TFT.drawBattery(0);
     TFT.drawBluetooth();
-    // tft.drawSignal();
+    TFT.drawSignal(NTP.online(), WiFi.status(), WiFi.RSSI());
     // tft.drawClock("fgh");
 }
 

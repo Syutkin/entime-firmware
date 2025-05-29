@@ -26,10 +26,9 @@ void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info)
         {
             Serial << i + 1 << ":" << endl;
             Serial << "SSID: " << WiFi.SSID(i) << " RSSI: " << WiFi.RSSI(i) << endl;
-            if (WiFi.SSID(i) = "Pipes")
+            if (WiFi.SSID(i) = settings.WiFi.ssid)
             {
-                WiFi.begin(WiFi.SSID(i), "123");
-                break;
+                WiFi.begin(settings.WiFi.ssid, settings.WiFi.passwd);
             }
         }
         break;
