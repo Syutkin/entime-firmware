@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../stubs/Arduino.h"
+#include "../base/Arduino.h"
 #include "esp_log.h"
 #include <ArduinoJson.h>
 #include <cstddef>
@@ -30,6 +30,7 @@ public:
   size_t print(const String &s) {
     return write(reinterpret_cast<const uint8_t *>(s.data()), s.size());
   }
+  size_t print(char c) { return write(static_cast<uint8_t>(c)); }
 };
 
 struct HostSerial {

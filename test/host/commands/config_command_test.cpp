@@ -1,4 +1,4 @@
-#include "support.h"
+#include "../support/application/environment.h"
 #include "command/handlers.h"
 #include "hal/touch/touch.h"
 #include <esp_timer.h>

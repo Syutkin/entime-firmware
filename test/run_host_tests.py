@@ -10,6 +10,49 @@ import subprocess
 import tempfile
 
 
+# Translation units linked with suites that do not include production sources
+# directly. Paths are relative to src/; shared support is configured separately.
+PRODUCTION_SOURCES = {
+    "events/ble_delivery_test.cpp": (
+        "hal/ble/nus_service.cpp", "timing/event_isr.cpp",
+        "timing/event_dispatcher.cpp", "timing/event_timestamp.cpp",
+    ),
+    "events/event_timestamp_test.cpp": (
+        "storage/settings.cpp", "timing/event_timestamp.cpp",
+        "timing/event_dispatcher.cpp", "timing/event_isr.cpp", "hal/ble/nus_service.cpp",
+    ),
+    "events/event_pipeline_test.cpp": (
+        "storage/settings.cpp", "timing/event_timestamp.cpp", "timing/event_dispatcher.cpp",
+        "timing/event_isr.cpp", "timing/pps_isr.cpp", "timing/rtc_sqw_isr.cpp",
+        "hal/ble/nus_service.cpp",
+    ),
+    "settings/settings_persistence_test.cpp": (),
+    "settings/settings_validation_test.cpp": (),
+    "commands/config_command_test.cpp": (
+        "storage/settings.cpp", "command/handlers.cpp", "hal/touch/touch.cpp",
+    ),
+    "commands/command_parser_test.cpp": (
+        "command/command_parser.cpp", "hal/ble/nus_service.cpp",
+    ),
+    "commands/command_router_test.cpp": (
+        "storage/settings.cpp", "command/handlers.cpp", "command/command_parser.cpp",
+        "command/command_router.cpp", "hal/touch/touch.cpp", "runtime/build_info.cpp",
+    ),
+    "gps/gps_driver_test.cpp": ("hal/gps/gps.cpp",),
+    "rtc/rtc_driver_test.cpp": ("hal/rtc/rtc.cpp",),
+    "touch/touch_driver_test.cpp": ("hal/touch/touch.cpp",),
+    "touch/touch_flow_test.cpp": (
+        "app/touch_calibration_service.cpp", "hal/touch/touch.cpp", "storage/settings.cpp",
+    ),
+    "battery/battery_driver_test.cpp": ("hal/ina226/ina226.cpp",),
+}
+SUPPORT_SOURCES = {
+    "events/event_pipeline_test.cpp": ("hal_globals.cpp",),
+    "commands/command_router_test.cpp": ("hal_globals.cpp", "command_environment.cpp"),
+}
+DRIVER_GROUPS = {"gps", "rtc", "touch", "battery"}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sanitize", action="store_true", help="enable UBSan")
@@ -23,6 +66,8 @@ def main() -> int:
     repo_dir = test_dir.parent
     suites = [source for source in sorted((test_dir / "host").glob("**/*_test.cpp"))
               if args.suite in str(source.relative_to(test_dir))]
+    host_dir = test_dir / "host"
+    shared = host_dir / "support" / "application"
     compiler = shlex.split(os.environ.get("CXX", "g++"))
     counts: Counter = Counter()
 
@@ -33,58 +78,31 @@ def main() -> int:
             command = compiler + [
                 "-std=c++17", "-O1", "-g", "-Wall", "-Wextra",
             ]
+            suite_path = source.relative_to(host_dir).as_posix()
+            group = suite_path.split("/", 1)[0]
             extra_sources = []
-            if source.parent.name == "project":
-                # Keep broader Arduino/HAL doubles isolated from timing suites.
+            if group != "timing":
+                if suite_path not in PRODUCTION_SOURCES:
+                    parser.error(f"no build configuration for {suite_path}")
+                # Hardware API doubles override application-level HAL models.
+                if group in DRIVER_GROUPS:
+                    command += [f"-I{host_dir / 'stubs' / 'drivers'}"]
                 command += [
-                    f"-I{source.parent / 'stubs'}",
+                    f"-I{host_dir / 'stubs' / 'application'}",
                     "-isystem", str(test_dir / "vendor" / "ArduinoJson" / "src"),
                     "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections",
                 ]
-                if source.name == "config_command_test.cpp":
-                    extra_sources = [
-                        repo_dir / "src" / relative for relative in (
-                            "storage/settings.cpp", "command/handlers.cpp",
-                            "hal/touch/touch.cpp",
-                        )
-                    ]
-                elif source.name == "ble_delivery_test.cpp":
-                    extra_sources = [
-                        repo_dir / "src" / relative for relative in (
-                            "hal/ble/nus_service.cpp", "timing/event_isr.cpp",
-                            "timing/event_dispatcher.cpp", "timing/event_timestamp.cpp",
-                        )
-                    ]
-                elif source.name == "command_parser_test.cpp":
-                    extra_sources = [repo_dir / "src" / relative for relative in (
-                        "command/command_parser.cpp", "hal/ble/nus_service.cpp",
-                    )]
-                elif source.name == "event_timestamp_test.cpp":
-                    extra_sources = [repo_dir / "src" / relative for relative in (
-                        "storage/settings.cpp", "timing/event_timestamp.cpp",
-                        "timing/event_dispatcher.cpp", "timing/event_isr.cpp",
-                        "hal/ble/nus_service.cpp",
-                    )]
-                elif source.name == "event_pipeline_test.cpp":
-                    extra_sources = [repo_dir / "src" / relative for relative in (
-                        "storage/settings.cpp", "timing/event_timestamp.cpp",
-                        "timing/event_dispatcher.cpp", "timing/event_isr.cpp",
-                        "timing/pps_isr.cpp", "timing/rtc_sqw_isr.cpp",
-                        "hal/ble/nus_service.cpp",
-                    )] + [source.parent / "support" / "hal_globals.cpp"]
-                elif source.name == "command_router_test.cpp":
-                    extra_sources = [repo_dir / "src" / relative for relative in (
-                        "storage/settings.cpp", "command/handlers.cpp",
-                        "command/command_parser.cpp", "command/command_router.cpp",
-                        "hal/touch/touch.cpp", "runtime/build_info.cpp",
-                    )] + [source.parent / "support" / name for name in (
-                        "hal_globals.cpp", "command_environment.cpp",
-                    )]
+                extra_sources += [repo_dir / "src" / name
+                                  for name in PRODUCTION_SOURCES[suite_path]]
+                extra_sources += [shared / name
+                                  for name in SUPPORT_SOURCES.get(suite_path, ())]
+                extra_sources.append(shared / "clock.cpp")
+                if group == "gps":
+                    command += ["-isystem", str(test_dir / "vendor" / "MicroNMEA" / "src")]
+                    extra_sources.append(test_dir / "vendor/MicroNMEA/src/MicroNMEA.cpp")
             command += [
-                f"-I{test_dir / 'host' / 'stubs'}", f"-I{repo_dir / 'src'}",
+                f"-I{host_dir / 'stubs' / 'base'}", f"-I{repo_dir / 'src'}",
             ]
-            if source.parent.name == "project":
-                extra_sources.append(source.parent / "clock.cpp")
             if args.sanitize:
                 command += ["-fsanitize=undefined", "-fno-sanitize-recover=all"]
             command += [str(source), *map(str, extra_sources), "-o", str(executable)]

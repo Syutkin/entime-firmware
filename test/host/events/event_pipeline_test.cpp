@@ -1,4 +1,4 @@
-#include "support/sync_pipeline.h"
+#include "../support/application/sync_pipeline.h"
 #include "hal/ble/nus_service.h"
 #include "timing/event_dispatcher.h"
 #include "timing/event_isr.h"

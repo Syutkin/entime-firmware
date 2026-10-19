@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../stubs/Arduino.h"
-#include "../stubs/fake_clock.h"
+#include "../stubs/base/Arduino.h"
+#include "../stubs/base/fake_clock.h"
 #include "test_runner.h"
 
 namespace host {

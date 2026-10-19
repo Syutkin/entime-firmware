@@ -1,4 +1,4 @@
-#include "support.h"
+#include "../support/application/environment.h"
 #include "hal/ble/nus_service.h"
 #include "storage/settings.h"
 #include "timing/event_dispatcher.h"

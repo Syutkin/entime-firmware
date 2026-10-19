@@ -1,4 +1,4 @@
-#include "support.h"
+#include "../support/application/environment.h"
 #include "command/command_parser.h"
 #include "command/command_router.h"
 #include "hal/ble/nus_service.h"
