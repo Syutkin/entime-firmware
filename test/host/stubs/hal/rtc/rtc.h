@@ -15,6 +15,7 @@ struct RTC {
 
   bool isReady() const { return ready; }
   bool lostPower() const { return lost_power; }
+  int64_t lastSyncUs() const { return last_write_esp_us; }
   uint32_t unixTime() const {
     host::clock.now_us += read_delay_us;
     return utc_sec;

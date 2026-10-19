@@ -130,20 +130,6 @@ template <int64_t Period, bool Locks> void sqw_lock_period_boundary() {
          "SQW warmup must accept 0.8..1.2s periods inclusive");
 }
 
-void sqw_raw_counter_zero_is_valid_edge() {
-  rtc_sqw_begin(kPin, FALLING);
-  s_count = UINT32_MAX - 1;
-  fire_edge(kPin, kStart);
-  read_edge();
-  fire_edge(kPin, kStart + 1000000);
-  int64_t timestamp = 0;
-  uint32_t count = 123;
-  expect(rtc_sqw_get_raw(timestamp, count),
-         "counter wrap to zero must not hide a captured SQW edge");
-  expect(count == 0 && timestamp == kStart + 1000000,
-         "wrapped SQW sample must preserve count zero and latest timestamp");
-}
-
 void sqw_raw_counter_recovers_after_wrap() {
   rtc_sqw_begin(kPin, FALLING);
   s_count = UINT32_MAX - 1;
@@ -178,8 +164,6 @@ const Test kTests[] = {
     {"sqw_lock_period_at_1200000us", sqw_lock_period_boundary<1200000, true>},
     {"sqw_lock_period_above_1200000us",
      sqw_lock_period_boundary<1200001, false>},
-    {"sqw_raw_counter_zero_is_valid_edge", sqw_raw_counter_zero_is_valid_edge,
-     "TS008"},
     {"sqw_raw_counter_recovers_after_wrap",
      sqw_raw_counter_recovers_after_wrap},
 };

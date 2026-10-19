@@ -98,6 +98,9 @@ static constexpr int64_t kSqwAgeWindowUs = 900000; // если обработа�
 static constexpr int64_t kSqwCountToleranceUs = 200000;
 static bool s_in_rtc_fallback = false;
 static bool s_have_rtc_anchor = false;
+// Внешняя установка RTC меняет UTC секунду и может изменить фазу SQW.
+static int64_t s_last_observed_rtc_sync_us = 0;
+static bool s_rtc_reanchor_after_write = false;
 
 // Измеренный при живом PPS сдвиг RTC SQW относительно UTC-секунд.
 // UTC момент SQW edge = ближайшая PPS UTC секунда + s_rtc_sqw_utc_offset_us.
@@ -183,6 +186,28 @@ static bool have_rtc_time_anchor() {
   return s_have_rtc_anchor &&
          (s_status.anchor_utc_us != 0) &&
          (s_status.anchor_esp_us != 0);
+}
+
+static void observe_external_rtc_write() {
+  const int64_t sync_us = rtc.lastSyncUs();
+  if (sync_us == s_last_observed_rtc_sync_us)
+    return;
+
+  s_last_observed_rtc_sync_us = sync_us;
+  s_rtc_reanchor_after_write = true;
+  s_rtc_anchor_sqw_count = 0;
+  s_last_rtc_resync_us = 0;
+  s_have_rtc_sqw_utc_offset = false;
+  s_rtc_sqw_utc_offset_us = 0;
+  s_rtc_pps_pending = false;
+
+  // Прежний RTC anchor относится к уже заменённому времени. GPS anchor
+  // остаётся независимым источником UTC и не сбрасывается при записи RTC.
+  if (have_rtc_time_anchor()) {
+    set_anchor(TimeSource::NONE, 0, 0);
+    s_status.synced = false;
+    s_last_sqw_edge_us = 0;
+  }
 }
 
 static bool have_recent_rtc_holdover_anchor() {
@@ -347,6 +372,9 @@ static PpsSqwSample log_pps_sqw_delta(int64_t pps_esp_us, uint32_t pps_count) {
              (long long)pps_esp_us, (unsigned long)pps_count);
     return sample;
   }
+  // Фронт до установки RTC не описывает новую фазу SQW.
+  if (sqw_edge_us <= rtc.lastSyncUs())
+    return sample;
 
   int64_t raw_delta_us = pps_esp_us - sqw_edge_us;
   int64_t phase_delta_us = raw_delta_us;
@@ -524,6 +552,10 @@ bool time_sync_esp_to_utc_us(int64_t esp_us, int64_t &utc_us_out) {
     return false;
 
   if (s_status.source == TimeSource::RTC &&
+      rtc.lastSyncUs() != s_last_observed_rtc_sync_us)
+    return false;
+
+  if (s_status.source == TimeSource::RTC &&
       !rtc_sqw_is_locked() &&
       !have_recent_rtc_holdover_anchor()) {
     return false;
@@ -648,6 +680,8 @@ void time_sync_begin() {
   s_rtc_anchor_sqw_count = 0;
   s_last_sqw_edge_us = 0;
   s_have_rtc_anchor = false;
+  s_last_observed_rtc_sync_us = rtc.lastSyncUs();
+  s_rtc_reanchor_after_write = false;
   s_have_rtc_sqw_utc_offset = false;
   s_rtc_sqw_utc_offset_us = 0;
   rtc_sqw_begin(RTC_SQW_PIN, FALLING);
@@ -687,6 +721,7 @@ void time_sync_set_state_callback(TimeSyncStateCallback callback) {
 }
 
 void time_sync_update() {
+  observe_external_rtc_write();
   const bool auto_sync_enabled = is_auto_sync_enabled();
   const uint8_t sync_source = settings.getSync().source;
   const bool allow_gps = (sync_source != 2);
@@ -780,6 +815,14 @@ void time_sync_update() {
         }
       }
       s_logged_sqw_warmup = false;
+      notify_state_change_if_needed();
+      return;
+    }
+
+    // После явной установки RTC календарное время относится только к новым
+    // SQW фронтам. Старый ISR sample нельзя связать с новой UTC секундой.
+    if (s_rtc_reanchor_after_write && sqw_edge_us <= s_last_observed_rtc_sync_us) {
+      set_fallback_status_from_anchor(allow_gps);
       notify_state_change_if_needed();
       return;
     }
@@ -905,11 +948,13 @@ void time_sync_update() {
           int64_t rtc_utc_us = 0;
           const char *anchor_source = "system";
 
-          if (auto_sync_enabled && have_rtc_anchor && s_rtc_anchor_sqw_count != 0) {
+          if (!s_rtc_reanchor_after_write && auto_sync_enabled &&
+              have_rtc_anchor && s_rtc_anchor_sqw_count != 0) {
             const uint32_t seconds = sqw_count - s_rtc_anchor_sqw_count;
             rtc_utc_us = s_status.anchor_utc_us + (int64_t)seconds * 1000000LL;
             anchor_source = "sqw";
-          } else if (system_time_at_esp_time_us(sqw_edge_us, rtc_utc_us)) {
+          } else if (!s_rtc_reanchor_after_write &&
+                     system_time_at_esp_time_us(sqw_edge_us, rtc_utc_us)) {
             rtc_utc_us = apply_known_sqw_utc_offset(rtc_utc_us);
             anchor_source = s_have_rtc_sqw_utc_offset ? "system+sqw_offset" : "system";
           } else {
@@ -924,7 +969,8 @@ void time_sync_update() {
             // rtc.unixTime() обновляется относительно SQW. Если есть старый anchor,
             // выбираем ближайшую соседнюю секунду к уже идущему времени.
             int64_t est_utc_us = 0;
-            if (time_sync_esp_to_utc_us(sqw_edge_us, est_utc_us)) {
+            if (!s_rtc_reanchor_after_write &&
+                time_sync_esp_to_utc_us(sqw_edge_us, est_utc_us)) {
               int64_t diff = rtc_utc_us - est_utc_us;
               if (diff > 500000 && diff < 1500000)            rtc_utc_us -= 1000000LL;
               else if (diff < -500000 && diff > -1500000)     rtc_utc_us += 1000000LL;
@@ -954,6 +1000,7 @@ void time_sync_update() {
           set_anchor(TimeSource::RTC, rtc_utc_us, sqw_edge_us);
           s_rtc_anchor_sqw_count = sqw_count;
           s_last_rtc_resync_us = now_us;
+          s_rtc_reanchor_after_write = false;
           s_logged_rtc_anchor_wait = false;
         }
 
@@ -1208,6 +1255,9 @@ void time_sync_update() {
     if (auto_sync_enabled && age_us <= kRtcPpsAlignWindowUs && rtc.isReady() &&
         utc_second == s_rtc_pps_target_sec) {
       rtc.setTime(s_rtc_pps_target_sec);
+      // Эта запись уже привязана к принятому GPS PPS, её не следует считать
+      // внешней коррекцией при следующем вызове time_sync_update().
+      s_last_observed_rtc_sync_us = rtc.lastSyncUs();
       ESP_LOGI(TAG, "RTC set from PPS: %lu (aligned, age %lld us)",
                (unsigned long)s_rtc_pps_target_sec, (long long)age_us);
       s_last_rtc_pps_sync_us = now_us;

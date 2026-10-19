@@ -181,7 +181,7 @@ const Test kTests[] = {
     {"rtc_initial_validation_latency_does_not_shift_anchor",
      rtc_initial_validation_latency_does_not_shift_anchor},
     {"external_rtc_correction_updates_event_time",
-     external_rtc_correction_updates_event_time, "TS006"},
+     external_rtc_correction_updates_event_time},
     {"sqw_extra_edge_does_not_add_utc_second",
      sqw_extra_edge_does_not_add_utc_second},
 };
