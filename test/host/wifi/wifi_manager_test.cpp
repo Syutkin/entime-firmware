@@ -181,13 +181,51 @@ void disconnect_callback_has_zero_rssi() {
   expect(changes.back().state == WiFiState::OFF && changes.back().rssi == 0,
          "OFF callback must not expose RSSI from the previous connection");
 }
+void disconnect_callback_can_start_new_connection() {
+  connected();
+  wifiManager.setStateCallback([](WiFiState state, int8_t rssi) {
+    changed(state, rssi);
+    if (state == WiFiState::OFF) {
+      expect(rssi == 0, "OFF callback must observe cleaned connection state");
+      require(wifiManager.connect("NewNetwork", "new-pass"), "callback may start a new connection");
+    }
+  });
+  wifiManager.disconnect();
+  host_wifi::emit(ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  expect(wifiManager.isConnected() && wifiManager.getSSID() == "NewNetwork",
+         "disconnect must not clear a new connection started by its callback");
+  lost(); retry();
+  expect(host_wifi::attempts.size() == 3 && host_wifi::attempts.back().password == "new-pass",
+         "callback-started connection must retain credentials and automatic recovery");
+}
 void late_ip_after_disconnect_is_ignored() {
   connected(); wifiManager.disconnect();
+  const auto count = changes.size(); const auto reads = host_wifi::rssi_reads;
   // The queued callback arrives after the radio has already disconnected.
   // Unlike emit(), it must not change the current core status back to connected.
   host_wifi::callback(ARDUINO_EVENT_WIFI_STA_GOT_IP, {}); advance(60000);
-  expect(wifiManager.getState() == WiFiState::OFF && !wifiManager.isConnected(),
+  expect(wifiManager.getState() == WiFiState::OFF && !wifiManager.isConnected() &&
+             changes.size() == count && host_wifi::rssi_reads == reads,
          "a late IP event must not reactivate a manually disconnected station");
+}
+void ip_without_connection_request_is_ignored() {
+  begin(); host_wifi::emit(ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  expect(wifiManager.getState() == WiFiState::OFF && !wifiManager.isConnected() &&
+             changes.size() == 1 && host_wifi::rssi_reads == 0,
+         "IP without a connection request must not activate an idle manager");
+}
+void cancelled_connection_can_be_restarted() {
+  connect(); wifiManager.disconnect();
+  host_wifi::callback(ARDUINO_EVENT_WIFI_STA_GOT_IP, {});
+  expect(wifiManager.getState() == WiFiState::OFF,
+         "IP from a cancelled in-progress connection must be ignored");
+  require(wifiManager.connect("NewNetwork", "new-pass"), "explicit connection must restart");
+  host_wifi::emit(ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  expect(wifiManager.isConnected() && wifiManager.getSSID() == "NewNetwork",
+         "IP from a new explicit connection must still be accepted");
+  lost(); retry();
+  expect(host_wifi::attempts.size() == 3 && host_wifi::attempts.back().ssid == "NewNetwork",
+         "new connection must retain normal automatic recovery");
 }
 template <unsigned Mode> void end_and_restart() {
   connected();
@@ -251,8 +289,11 @@ const Test kTests[] = {
   {"wifi_rssi_interval", rssi_polling<false>},
   {"wifi_rssi_rollover", rssi_polling<true>},
   {"wifi_disconnect_cancels_retry", disconnect_cancels_retry},
-  {"wifi_disconnect_callback_zero_rssi", disconnect_callback_has_zero_rssi, "WF002"},
-  {"wifi_late_ip_after_disconnect", late_ip_after_disconnect_is_ignored, "WF001"},
+  {"wifi_disconnect_callback_zero_rssi", disconnect_callback_has_zero_rssi},
+  {"wifi_disconnect_callback_restart", disconnect_callback_can_start_new_connection},
+  {"wifi_late_ip_after_disconnect", late_ip_after_disconnect_is_ignored},
+  {"wifi_ip_without_connection_request", ip_without_connection_request_is_ignored},
+  {"wifi_cancelled_connection_restart", cancelled_connection_can_be_restarted},
   {"wifi_end_immediate", end_and_restart<0>},
   {"wifi_end_delayed", end_and_restart<1>},
   {"wifi_end_timeout", end_and_restart<2>},

@@ -123,11 +123,11 @@ void WiFiManager::disconnect() {
     _autoReconnect = false;
     WiFi.disconnect(true);
     
-    setState(WiFiState::OFF);
     _ssid = "";
     _password = "";
     _rssi = 0;
     _reconnectAttempts = 0;
+    setState(WiFiState::OFF);
 }
 
 bool WiFiManager::isConnected() {
@@ -212,6 +212,10 @@ void WiFiManager::onWiFiEvent(arduino_event_id_t event, arduino_event_info_t inf
             break;
             
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+            // Запоздавший IP не должен возобновлять отменённое подключение.
+            if (!_autoReconnect || _ssid.length() == 0) {
+                break;
+            }
             ESP_LOGI(TAG, "WiFi got IP: %s", WiFi.localIP().toString().c_str());
             _rssi = WiFi.RSSI();
             _lastRSSIUpdate = millis();
