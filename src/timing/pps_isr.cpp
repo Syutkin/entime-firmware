@@ -32,7 +32,8 @@ static void IRAM_ATTR pps_isr_handler() {
   s_pps_time_us = now;
   s_last_pps_us = now;
   s_pps_valid   = true;
-  s_pps_count++;
+  const uint32_t count = s_pps_count;
+  s_pps_count = count + 1U;
 }
 
 void pps_init(int gpio_pin) {

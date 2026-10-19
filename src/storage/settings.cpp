@@ -72,7 +72,7 @@ bool SettingsManager::validateDevice(const DeviceSettings &device) const {
     return false;
   }
 
-  if (device.number < 1 || device.number > 255) {
+  if (device.number == 0) {
     ESP_LOGE(TAG, "Invalid device.number: must be 1-255, got %u",
              device.number);
     return false;

@@ -53,10 +53,13 @@ EventTimestampData event_timestamp_process(int64_t esp_timestamp_us,
   data.hours = tm.tm_hour;
   data.minutes = tm.tm_min;
   data.seconds = tm.tm_sec;
-  data.milliseconds = (uint16_t)(data.local_time.tv_usec / 1000);
+  const unsigned milliseconds = static_cast<unsigned>(local_usec / 1000);
+  data.milliseconds = static_cast<uint16_t>(milliseconds);
 
-  // Форматирование строки времени "HH:MM:SS,mmm" из компонентов
-  snprintf(data.local_time_str, sizeof(data.local_time_str), "%02d:%02d:%02d,%03d", data.hours, data.minutes, data.seconds, data.milliseconds);
+  // local_usec нормализован в диапазон 0..999999, milliseconds — 0..999.
+  strftime(data.local_time_str, sizeof(data.local_time_str), "%H:%M:%S", &tm);
+  snprintf(data.local_time_str + 8, sizeof(data.local_time_str) - 8,
+           ",%03u", milliseconds);
 
   if (data.module_type == ModuleType::START) {
     const int64_t minute_ms = 60LL * 1000LL;

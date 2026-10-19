@@ -21,7 +21,8 @@ static constexpr int64_t kLossTimeoutUs = 1500000; // 1.5s
 
 static void IRAM_ATTR on_sqw_isr() {
   s_last_edge_us = esp_timer_get_time();
-  s_count++;
+  const uint32_t count = s_count;
+  s_count = count + 1U;
 }
 
 void rtc_sqw_begin(int gpio, int edge_mode) {
