@@ -91,13 +91,14 @@ static int64_t  s_last_nmea_esp_us  = 0;
 // так на следующих SQW тиках можно строить UTC без I2C чтения RTC.
 static uint32_t s_last_sqw_count = 0;
 static uint32_t s_rtc_anchor_sqw_count = 0; // sqw_count в момент set_anchor(RTC,...)
-static int64_t  s_last_sqw_edge_us = 0; // последний обработанный фронт SQW (для accuracy)
+static int64_t  s_last_sqw_edge_us = 0; // последний принятый фронт доверенного RTC
 static constexpr int64_t kSqwAgeWindowUs = 900000; // если обработали позже — лучше не переякориваться
 // Raw counter считает все GPIO фронты. Его приращение должно соответствовать
 // времени от RTC anchor, иначе лишний/пропущенный фронт станет UTC секундой.
 static constexpr int64_t kSqwCountToleranceUs = 200000;
 static bool s_in_rtc_fallback = false;
 static bool s_have_rtc_anchor = false;
+static bool s_rtc_trust_failed = false;
 // Внешняя установка RTC меняет UTC секунду и может изменить фазу SQW.
 static int64_t s_last_observed_rtc_sync_us = 0;
 static bool s_rtc_reanchor_after_write = false;
@@ -556,7 +557,7 @@ bool time_sync_esp_to_utc_us(int64_t esp_us, int64_t &utc_us_out) {
     return false;
 
   if (s_status.source == TimeSource::RTC &&
-      !rtc_sqw_is_locked() &&
+      (s_rtc_trust_failed || !rtc_sqw_is_locked()) &&
       !have_recent_rtc_holdover_anchor()) {
     return false;
   }
@@ -680,6 +681,7 @@ void time_sync_begin() {
   s_rtc_anchor_sqw_count = 0;
   s_last_sqw_edge_us = 0;
   s_have_rtc_anchor = false;
+  s_rtc_trust_failed = false;
   s_last_observed_rtc_sync_us = rtc.lastSyncUs();
   s_rtc_reanchor_after_write = false;
   s_have_rtc_sqw_utc_offset = false;
@@ -776,6 +778,7 @@ void time_sync_update() {
     s_status.phase_aligned = false;
 
     if (!rtc.isReady()) {
+      s_rtc_trust_failed = true;
       s_rtc_anchor_sqw_count = 0;
       set_fallback_status_from_anchor(allow_gps);
       notify_state_change_if_needed();
@@ -872,7 +875,6 @@ void time_sync_update() {
     // RTC fallback работает по фронтам SQW, а не по частоте loop().
     if (sqw_count != s_last_sqw_count) {
       s_last_sqw_count = sqw_count;
-      s_last_sqw_edge_us = sqw_edge_us;
       if (s_rtc_fallback_ticks < 255) s_rtc_fallback_ticks++;
 
       int64_t now_us = esp_timer_get_time();
@@ -907,7 +909,7 @@ void time_sync_update() {
         }
 
         bool need_reanchor =
-            !have_rtc_anchor ||
+            !have_rtc_anchor || s_rtc_trust_failed ||
             (s_rtc_anchor_sqw_count == 0) ||
             (s_last_rtc_resync_us == 0) ||
             ((now_us - s_last_rtc_resync_us) >= kRtcResyncPeriodUs);
@@ -933,6 +935,7 @@ void time_sync_update() {
 
         if (need_reanchor && allow_reanchor_now) {
           if (!rtc.timeValid(kMinValidUnixSec)) {
+            s_rtc_trust_failed = true;
             if (!s_logged_rtc_anchor_wait) {
               ESP_LOGW(TAG,
                        "RTC fallback: RTC time is not trusted (lost_power=%d, min_unix=%lu)",
@@ -1000,6 +1003,7 @@ void time_sync_update() {
           set_anchor(TimeSource::RTC, rtc_utc_us, sqw_edge_us);
           s_rtc_anchor_sqw_count = sqw_count;
           s_last_rtc_resync_us = now_us;
+          s_rtc_trust_failed = false;
           s_rtc_reanchor_after_write = false;
           s_logged_rtc_anchor_wait = false;
         }
@@ -1033,6 +1037,8 @@ void time_sync_update() {
         // интервалом между соседними фронтами и не накапливается в UTC.
         set_anchor(TimeSource::RTC, edge_utc_us, sqw_edge_us);
         s_rtc_anchor_sqw_count = sqw_count;
+        // Недоверенный RTC не должен продлевать holdover одними фронтами SQW.
+        s_last_sqw_edge_us = sqw_edge_us;
 
         // target_us - UTC оценка на момент текущей обработки loop().
         int64_t target_us = edge_utc_us + age_us;
@@ -1344,7 +1350,7 @@ TimeSyncState time_sync_state() {
   }
 
   if (s_status.source == TimeSource::RTC) {
-    if (rtc_sqw_is_locked())
+    if (!s_rtc_trust_failed && rtc_sqw_is_locked())
       return TimeSyncState::RTC_OK;
     return have_recent_rtc_holdover_anchor() ? TimeSyncState::RTC_DEGRADED
                                              : TimeSyncState::NONE;
@@ -1394,7 +1400,7 @@ int64_t time_sync_estimate_accuracy_us() {
     }
 
     case TimeSource::RTC: {
-      if (!rtc_sqw_is_locked())
+      if (s_rtc_trust_failed || !rtc_sqw_is_locked())
         return -1;
 
       if (!rtc.timeValid(kMinValidUnixSec))
