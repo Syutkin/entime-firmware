@@ -33,9 +33,10 @@ static String jsonForLog(const JsonDocument &request) {
 }
 
 CommandParser::CommandParser(Stream &stream, const char *sourceName,
-                             size_t bufferSize)
+                             size_t bufferSize, SessionIdProvider sessionIdProvider)
     : _stream(&stream), _sourceName(sourceName), _bufferSize(bufferSize),
-      _bufferPos(0), _discarding(false) {
+      _bufferPos(0), _discarding(false), _sessionIdProvider(sessionIdProvider),
+      _sessionId(sessionIdProvider ? sessionIdProvider() : 0) {
   _buffer = (char *)malloc(_bufferSize);
   if (!_buffer) {
     ESP_LOGE(TAG, "[%s] Failed to allocate buffer of size %u", _sourceName,
@@ -60,6 +61,8 @@ void CommandParser::update() {
     return;
   }
 
+  resetIfSessionChanged();
+
   // Проверка таймаута незавершённого кадра
   if (_bufferPos > 0) {
     if (millis() - _frameStartMs > FRAME_TIMEOUT_MS) {
@@ -77,6 +80,8 @@ void CommandParser::update() {
     }
     while (_stream->available() > 0) {
       int c = _stream->read();
+      if (resetIfSessionChanged())
+        return;
       if (c < 0) {
         break;
       }
@@ -94,6 +99,8 @@ void CommandParser::update() {
   // Читаем доступные байты из потока
   while (_stream->available() > 0) {
     int c = _stream->read();
+    if (resetIfSessionChanged())
+      return;
     if (c < 0) {
       break;
     }
@@ -140,6 +147,8 @@ void CommandParser::update() {
 }
 
 void CommandParser::processJson() {
+  if (resetIfSessionChanged())
+    return;
   if (_bufferPos == 0) {
     return;
   }
@@ -182,7 +191,22 @@ void CommandParser::processJson() {
            jsonForLog(doc).c_str());
   
   // Маршрутизация команды к обработчику
+  if (resetIfSessionChanged())
+    return;
   CommandRouter::route(doc, *_stream);
+}
+
+bool CommandParser::resetIfSessionChanged() {
+  if (!_sessionIdProvider)
+    return false;
+  const uint32_t sessionId = _sessionIdProvider();
+  if (sessionId == _sessionId)
+    return false;
+  _sessionId = sessionId;
+  clearBuffer();
+  _discarding = false;
+  _frameStartMs = 0;
+  return true;
 }
 
 void CommandParser::clearBuffer() {

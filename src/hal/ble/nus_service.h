@@ -17,6 +17,9 @@ public:
   void configureAdvertising(NimBLEAdvertisementData &advData) override;
 
   bool isConnected() const;
+  uint32_t connectionGeneration() const {
+    return _connectionGeneration.load(std::memory_order_acquire);
+  }
 
   // Один надежный пакет в RAM; остальные записи сначала завершают его отправку.
   static constexpr size_t kMaxPendingPacketSize = 40;
@@ -36,6 +39,7 @@ public:
   void onNotifyStateChanged(bool enabled);
 
 private:
+  void resetRx_();
   size_t writeDirect_(const uint8_t *buffer, size_t size);
   uint8_t _pendingPacket[kMaxPendingPacketSize]{};
   size_t _pendingSize = 0;

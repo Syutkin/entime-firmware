@@ -12,13 +12,16 @@
  */
 class CommandParser {
 public:
+    using SessionIdProvider = uint32_t (*)();
     /**
      * @brief Конструктор парсера
      * @param stream Поток для чтения данных (Serial, NUS и т.д.)
      * @param sourceName Имя источника для логирования (например, "Serial" или "BLE")
      * @param bufferSize Размер буфера для накопления данных (по умолчанию 1024 байт)
+     * @param sessionIdProvider Номер сессии потока; смена сбрасывает незавершённый кадр
      */
-    CommandParser(Stream& stream, const char* sourceName = "Unknown", size_t bufferSize = 1024);
+    CommandParser(Stream& stream, const char* sourceName = "Unknown", size_t bufferSize = 1024,
+                  SessionIdProvider sessionIdProvider = nullptr);
     
     /**
      * @brief Деструктор - освобождает буфер
@@ -43,6 +46,7 @@ private:
      * @brief Очистка буфера
      */
     void clearBuffer();
+    bool resetIfSessionChanged();
 
 private:
     Stream* _stream;              // Поток для чтения данных
@@ -53,6 +57,8 @@ private:
 
     uint32_t _frameStartMs = 0;     // Время начала приёма кадра
     bool _discarding = false;       // Сбрасываем oversized кадр до \n
+    SessionIdProvider _sessionIdProvider;
+    uint32_t _sessionId;
     static constexpr uint32_t FRAME_TIMEOUT_MS = 1000; // Таймаут
 };
 

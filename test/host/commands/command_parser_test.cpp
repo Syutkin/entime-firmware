@@ -75,21 +75,114 @@ template <bool Peeked> void reconnect_clears_old_rx_bytes() {
   if constexpr (Peeked) require(nusService.peek() == '{', "peek must cache first byte");
   nusService.onDisconnect(0); nusService.onConnect(client, 23);
   expect(nusService.available() == 0 && nusService.peek() == -1 && nusService.read() == -1,
-         "AU005: a new BLE session must start with an empty RX stream and peek cache");
+         "a new BLE session must start with an empty RX stream and peek cache");
 }
 
 void reconnect_does_not_mix_commands() {
   NimBLEServer server;
   require(nusService.init(&server), "NUS must initialize");
   NimBLEConnInfo client; nusService.onConnect(client, 23);
-  CommandParser parser(nusService, "BLE", kFrameSize);
+  CommandParser parser(nusService, "BLE", kFrameSize, [] { return nusService.connectionGeneration(); });
   const std::string old = "{\"cmd\":\"old\"";
   nusService.onReceive(reinterpret_cast<const uint8_t *>(old.data()), old.size());
   nusService.onDisconnect(0); nusService.onConnect(client, 23);
   nusService.onReceive(reinterpret_cast<const uint8_t *>(ping.data()), ping.size());
   parser.update();
   expect(commands == std::vector<std::string>{"ping"},
-         "AU005: next client's command must not concatenate with previous client's bytes");
+         "next client's command must not concatenate with previous client's bytes");
+}
+
+void receive(const std::string &bytes) {
+  nusService.onReceive(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
+}
+
+template <unsigned Frame, bool Restart> void session_change_clears_parser_state() {
+  NimBLEServer server;
+  require(nusService.init(&server), "NUS must initialize");
+  NimBLEConnInfo client; nusService.onConnect(client, 23);
+  CommandParser parser(nusService, "BLE", kFrameSize,
+                        [] { return nusService.connectionGeneration(); });
+  if constexpr (Frame == 0) {
+    receive("{\"cmd\":\"old\"");
+    parser.update(); // Old bytes now live in CommandParser, not the RX stream.
+  } else if constexpr (Frame == 1) {
+    receive(std::string(kFrameSize, 'x'));
+    parser.update();
+    require(errors == std::vector<int>{104}, "old connection must enter discard mode");
+  } else {
+    receive("{\"cmd\":\"factory_reset\"}\n"); // Queued, not yet consumed.
+  }
+  if constexpr (Restart) {
+    nusService.onBleEnd();
+    require(nusService.init(&server), "BLE must restart");
+  } else nusService.onDisconnect(0);
+  nusService.onConnect(client, 23);
+  receive(ping); parser.update();
+  expect(commands == std::vector<std::string>{"ping"},
+         "new session must discard the old partial, oversized or queued command");
+  expect(errors.size() == (Frame == 1 ? 1U : 0U),
+         "new session must not inherit framing errors from an old command");
+}
+
+void disconnect_discards_rx_and_rejects_offline_input() {
+  NimBLEServer server; require(nusService.init(&server), "NUS must initialize");
+  NimBLEConnInfo client; nusService.onConnect(client, 23);
+  receive(ping); require(nusService.peek() == '{', "old RX must populate peek");
+  nusService.onDisconnect(0);
+  expect(nusService.available() == 0 && nusService.peek() == -1 && nusService.read() == -1,
+         "disconnect must immediately clear both RX and peek");
+  receive(ping);
+  expect(nusService.available() == 0, "offline input must not enter the RX stream");
+}
+
+void subscription_change_keeps_same_session_frame() {
+  NimBLEServer server; require(nusService.init(&server), "NUS must initialize");
+  NimBLEConnInfo client; nusService.onConnect(client, 23);
+  CommandParser parser(nusService, "BLE", kFrameSize,
+                        [] { return nusService.connectionGeneration(); });
+  receive("{\"cmd\":"); parser.update();
+  nusService.onNotifyStateChanged(false);
+  nusService.onNotifyStateChanged(true);
+  receive("\"ping\"}\n"); parser.update();
+  expect(commands == std::vector<std::string>{"ping"},
+         "subscription changes must preserve a command within the same connection");
+}
+
+void repeated_reconnect_before_polling_clears_old_frame() {
+  NimBLEServer server; require(nusService.init(&server), "NUS must initialize");
+  NimBLEConnInfo client; nusService.onConnect(client, 23);
+  CommandParser parser(nusService, "BLE", kFrameSize,
+                        [] { return nusService.connectionGeneration(); });
+  receive("{\"cmd\":"); parser.update();
+  for (unsigned i = 0; i < 3; ++i) {
+    nusService.onDisconnect(0); nusService.onConnect(client, 23);
+    receive("old session bytes");
+  }
+  nusService.onDisconnect(0); nusService.onConnect(client, 23);
+  receive(ping); parser.update();
+  expect(commands == std::vector<std::string>{"ping"},
+         "several session changes between polls must not preserve an old frame");
+}
+
+template <bool LastByte> void reconnect_during_command_read_does_not_route_old_frame() {
+  NimBLEServer server; require(nusService.init(&server), "NUS must initialize");
+  NimBLEConnInfo client; nusService.onConnect(client, 23);
+  CommandParser parser(nusService, "BLE", kFrameSize,
+                        [] { return nusService.connectionGeneration(); });
+  const std::string old = "{\"cmd\":\"factory_reset\"}\n";
+  receive(old);
+  unsigned reads = 0;
+  host_project::after_rx_read = [&] {
+    if (++reads != (LastByte ? old.size() : 1U)) return;
+    host_project::after_rx_read = nullptr;
+    nusService.onDisconnect(0); nusService.onConnect(client, 23);
+    receive(ping);
+  };
+  parser.update();
+  expect(commands.empty(), "session switch during read must not execute the old command");
+  parser.update();
+  expect(commands == std::vector<std::string>{"ping"},
+         "the new client's command must survive a session switch during the old read");
 }
 
 std::string captured_logs() {
@@ -205,14 +298,25 @@ void log_preserves_non_secret_fields() {
 }
 
 const Test kTests[] = {
+  {"ble_reconnect_during_first_command_byte", reconnect_during_command_read_does_not_route_old_frame<false>},
+  {"ble_reconnect_during_last_command_byte", reconnect_during_command_read_does_not_route_old_frame<true>},
+  {"ble_reconnect_clears_consumed_partial_frame", session_change_clears_parser_state<0,false>},
+  {"ble_reconnect_clears_parser_discard_state", session_change_clears_parser_state<1,false>},
+  {"ble_reconnect_discards_queued_command", session_change_clears_parser_state<2,false>},
+  {"ble_restart_clears_consumed_partial_frame", session_change_clears_parser_state<0,true>},
+  {"ble_restart_clears_parser_discard_state", session_change_clears_parser_state<1,true>},
+  {"ble_restart_discards_queued_command", session_change_clears_parser_state<2,true>},
+  {"ble_disconnect_discards_rx_and_offline_input", disconnect_discards_rx_and_rejects_offline_input},
+  {"ble_subscription_change_keeps_partial_frame", subscription_change_keeps_same_session_frame},
+  {"ble_repeated_reconnect_between_parser_polls", repeated_reconnect_before_polling_clears_old_frame},
   {"parser_discard_timeout_preserves_command", discard_timeout_preserves_next_command<false>, "AU008"},
   {"parser_discard_timeout_millis_rollover", discard_timeout_preserves_next_command<true>, "AU008"},
   {"parser_oversized_newline_recovery_control", newline_recovers_oversized_frame},
   {"parser_partial_timeout_recovery_control", normal_partial_timeout_recovers},
   {"parser_fragmented_command_control", fragmented_command_routes_once},
-  {"ble_reconnect_clears_rx", reconnect_clears_old_rx_bytes<false>, "AU005"},
-  {"ble_reconnect_clears_peek", reconnect_clears_old_rx_bytes<true>, "AU005"},
-  {"ble_reconnect_command_isolation", reconnect_does_not_mix_commands, "AU005"},
+  {"ble_reconnect_clears_rx", reconnect_clears_old_rx_bytes<false>},
+  {"ble_reconnect_clears_peek", reconnect_clears_old_rx_bytes<true>},
+  {"ble_reconnect_command_isolation", reconnect_does_not_mix_commands},
   {"parser_log_masks_wifi_ble", log_masks_wifi_password<false, false>},
   {"parser_log_masks_wifi_serial", log_masks_wifi_password<false, true>},
   {"parser_log_masks_save_config_ble", log_masks_wifi_password<true, false>},

@@ -49,6 +49,7 @@ bool BleNusService::init(NimBLEServer *server) {
   _mtu = 23;
   _peekedByte = -1;
   _hasPeeked = false;
+  _connectionGeneration.fetch_add(1, std::memory_order_release);
 
   _rxStream = xStreamBufferCreate(NUS_RX_BUFFER_SIZE, 1);
   if (!_rxStream) {
@@ -92,15 +93,25 @@ bool BleNusService::init(NimBLEServer *server) {
 }
 
 void BleNusService::onConnect(NimBLEConnInfo & /*connInfo*/, uint16_t mtu) {
-  _connectionGeneration.fetch_add(1, std::memory_order_relaxed);
+  resetRx_();
   _connected = true;
   _notifyEnabled = false;
   _mtu = mtu;
+  _connectionGeneration.fetch_add(1, std::memory_order_release);
 }
 
 void BleNusService::onDisconnect(int /*reason*/) {
   _connected = false;
   _notifyEnabled = false;
+  resetRx_();
+  _connectionGeneration.fetch_add(1, std::memory_order_release);
+}
+
+void BleNusService::resetRx_() {
+  if (_rxStream)
+    xStreamBufferReset(_rxStream);
+  _peekedByte = -1;
+  _hasPeeked = false;
 }
 
 bool BleNusService::isConnected() const { return _connected; }
@@ -123,6 +134,7 @@ void BleNusService::onBleEnd() {
     vStreamBufferDelete(_rxStream);
     _rxStream = nullptr;
   }
+  _connectionGeneration.fetch_add(1, std::memory_order_release);
 }
 
 void BleNusService::configureAdvertising(NimBLEAdvertisementData &advData) {
@@ -260,7 +272,7 @@ size_t BleNusService::writeDirect_(const uint8_t *buffer, size_t size) {
 }
 
 void BleNusService::onReceive(const uint8_t *data, size_t len) {
-  if (!_rxStream || !data || len == 0)
+  if (!_connected || !_rxStream || !data || len == 0)
     return;
 
   size_t pushed = xStreamBufferSend(_rxStream, data, len, 0);

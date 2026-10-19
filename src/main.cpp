@@ -358,7 +358,9 @@ void setup() {
 
   // Инициализация парсеров команд для Serial и BLE
   serialParser = new CommandParser(Serial, "Serial");
-  bleParser = new CommandParser(nusService, "BLE");
+  bleParser = new CommandParser(nusService, "BLE", 1024, [] {
+    return nusService.connectionGeneration();
+  });
   ESP_LOGI(TAG, "Command parsers initialized");
 
   // Инициализация WiFi (если включен в настройках)
