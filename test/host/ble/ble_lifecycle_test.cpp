@@ -111,13 +111,27 @@ void callbacks_and_mtu() {
              states.back() == BLEState::ADVERTISING,
          "disconnect callback must forward reason and resume advertising using existing services");
 }
-void remaining_client_keeps_connected_state() {
-  advertise(); NimBLEConnInfo info; connect(info);
-  ble.startAdvertising(); info.handle = 8; connect(info);
-  require(ble.getClientCount() == 2, "two clients must be counted");
-  NimBLEDevice::server->callbacks->onDisconnect(NimBLEDevice::server.get(), info, 19);
-  expect(ble.getClientCount() == 1 && ble.isConnected() && ble.getState() == BLEState::CONNECTED,
-         "disconnecting one of two clients must retain CONNECTED while another client remains");
+template <unsigned Clients> void remaining_client_keeps_connected_state() {
+  advertise(); NimBLEConnInfo info;
+  for (unsigned i = 0; i < Clients; ++i) {
+    if (i) ble.startAdvertising();
+    info.handle = 7 + i; connect(info);
+  }
+  require(ble.getClientCount() == Clients, "all clients must be counted");
+  for (unsigned remaining = Clients; remaining > 0; --remaining) {
+    info.handle = 7 + remaining - 1;
+    NimBLEDevice::server->callbacks->onDisconnect(NimBLEDevice::server.get(), info, 19);
+    const bool connected = remaining > 1;
+    const BLEState expected = connected ? BLEState::CONNECTED : BLEState::ADVERTISING;
+    expect(ble.getClientCount() == remaining - 1 && ble.isConnected() == connected &&
+               ble.getState() == expected && states.back() == expected &&
+               plugin.disconnects == Clients - remaining + 1,
+           "connection state and callbacks must match the count until the last client disconnects");
+  }
+  info.handle = 23;
+  connect(info);
+  expect(ble.isConnected() && ble.getClientCount() == 1 && states.back() == BLEState::CONNECTED,
+         "new connection after the final disconnect must start with a clean count");
 }
 void disconnect_count_does_not_underflow() {
   advertise(); ble.onDisconnect(0); ble.onDisconnect(0);
@@ -147,7 +161,8 @@ const Test kTests[] = {
   {"ble_advertising_start_failure_retry", advertising_failure_can_retry<false>},
   {"ble_plugin_limit", plugin_limit}, {"ble_plugin_failure_isolation", failing_plugin_does_not_skip_others},
   {"ble_callbacks_mtu_reconnect", callbacks_and_mtu},
-  {"ble_remaining_client_connected", remaining_client_keeps_connected_state, "BL001"},
+  {"ble_remaining_client_connected", remaining_client_keeps_connected_state<2>},
+  {"ble_three_clients_disconnect", remaining_client_keeps_connected_state<3>},
   {"ble_client_count_no_underflow", disconnect_count_does_not_underflow},
   {"ble_end_reinitialize", end_and_reinitialize}, {"ble_callback_removed", callback_removal},
 };

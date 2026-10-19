@@ -293,10 +293,10 @@ void BLE::onConnect(NimBLEConnInfo &connInfo, uint16_t mtu) {
 }
 
 void BLE::onDisconnect(int reason) {
-  _connected = false;
   if (_clientCount > 0) {
     --_clientCount;
   }
+  _connected = _clientCount > 0;
 
   pluginsOnDisconnect(reason);
   notifyStateChanged();
