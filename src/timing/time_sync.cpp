@@ -53,6 +53,18 @@ static constexpr int64_t kGpsLossHoldoverMaxAgeUs = 10000000;       // 10 s
 
 // Анти-±1s защита NMEA/PPS: сравниваем кандидата только со свежим GPS anchor.
 static constexpr int64_t kAnchorFreshnessUs = 3000000; // 3 секунды
+// RTC/system holdover не подтверждает номер UTC секунды GPS. При расхождении
+// больше половины секунды ждём несколько независимых согласованных NMEA.
+static constexpr uint8_t kGpsUtcStepConfirmations = 3;
+static bool s_gps_utc_confirmed = false;
+struct GpsUtcCandidate {
+  uint32_t utc_sec = 0;
+  uint32_t nmea_utc_sec = 0;
+  int64_t pps_esp_us = 0;
+  int64_t nmea_esp_us = 0;
+  uint8_t confirmations = 0;
+};
+static GpsUtcCandidate s_gps_utc_candidate{};
 
 // Дисциплина RTC по PPS: rtc.setTime() планируется на следующий PPS edge.
 static constexpr int64_t kRtcPpsSyncPeriodUs   = 10LL * 60LL * 1000000LL; // 10 минут
@@ -156,6 +168,8 @@ static void set_anchor(TimeSource src, int64_t anchor_utc_us, int64_t anchor_esp
   s_status.anchor_esp_us = anchor_esp_us;
   if (src == TimeSource::RTC) {
     s_have_rtc_anchor = true;
+    s_gps_utc_confirmed = false;
+    s_gps_utc_candidate = GpsUtcCandidate{};
   } else {
     s_have_rtc_anchor = false;
     s_rtc_anchor_sqw_count = 0;
@@ -375,6 +389,34 @@ static bool accept_pps_sqw_offset(const PpsSqwSample &sample, int64_t pps_esp_us
   return true;
 }
 
+// Подтверждаем новую UTC шкалу по независимым NMEA и ходу времени между PPS.
+static bool confirm_gps_utc_step(int64_t pps_esp_us, uint32_t utc_sec) {
+  if (s_gps_utc_candidate.confirmations != 0 &&
+      (s_last_nmea_esp_us == s_gps_utc_candidate.nmea_esp_us ||
+       s_last_nmea_utc_sec == s_gps_utc_candidate.nmea_utc_sec)) {
+    return false; // Повторное использование одной NMEA не является подтверждением.
+  }
+
+  const int64_t elapsed_us = pps_esp_us - s_gps_utc_candidate.pps_esp_us;
+  const int64_t utc_elapsed_us =
+      ((int64_t)utc_sec - (int64_t)s_gps_utc_candidate.utc_sec) * 1000000LL;
+  const bool consistent = s_gps_utc_candidate.confirmations != 0 &&
+      elapsed_us > 0 && elapsed_us <= kAnchorFreshnessUs &&
+      s_last_nmea_esp_us > s_gps_utc_candidate.nmea_esp_us &&
+      utc_elapsed_us > 0 &&
+      llabs(utc_elapsed_us - elapsed_us) <= kPpsIntervalToleranceUs;
+
+  const uint8_t confirmations = consistent
+      ? s_gps_utc_candidate.confirmations + 1 : 1;
+  s_gps_utc_candidate.utc_sec = utc_sec;
+  s_gps_utc_candidate.nmea_utc_sec = s_last_nmea_utc_sec;
+  s_gps_utc_candidate.pps_esp_us = pps_esp_us;
+  s_gps_utc_candidate.nmea_esp_us = s_last_nmea_esp_us;
+  s_gps_utc_candidate.confirmations = confirmations;
+
+  return confirmations >= kGpsUtcStepConfirmations;
+}
+
 /**
  * Определяем, какая UTC секунда соответствует данному PPS.
  *
@@ -389,13 +431,17 @@ static bool accept_pps_sqw_offset(const PpsSqwSample &sample, int64_t pps_esp_us
  * через estimate_pps_utc_from_holdover(), но состояние будет GPS_DEGRADED.
  */
 static bool align_pps_utc(int64_t pps_esp_us, uint32_t &pps_utc_sec_out, int64_t &phase_delta_us_out) {
-  if (!s_have_nmea)
+  if (!s_have_nmea) {
+    s_gps_utc_candidate = GpsUtcCandidate{};
     return false;
+  }
 
   int64_t now_us = esp_timer_get_time();
   int64_t nmea_age_us = now_us - s_last_nmea_esp_us;
-  if (nmea_age_us < 0 || nmea_age_us > kNmeaFreshnessUs)
+  if (nmea_age_us < 0 || nmea_age_us > kNmeaFreshnessUs) {
+    s_gps_utc_candidate = GpsUtcCandidate{};
     return false;
+  }
 
   // Знак delta выбирает UTC-секунду PPS, поэтому здесь нельзя применять
   // независимый фильтр по предыдущим NMEA-секундам: это может дать ошибку ±1s.
@@ -409,10 +455,12 @@ static bool align_pps_utc(int64_t pps_esp_us, uint32_t &pps_utc_sec_out, int64_t
   int64_t abs_delta = llabs(delta);
 
   if (abs_delta >= (1000000LL - kPhaseDeadbandUs)) {
+    s_gps_utc_candidate = GpsUtcCandidate{};
     return false;
   }
 
   if (abs_delta > kPhaseWindowUs) {
+    s_gps_utc_candidate = GpsUtcCandidate{};
     return false;
   }
 
@@ -422,29 +470,32 @@ static bool align_pps_utc(int64_t pps_esp_us, uint32_t &pps_utc_sec_out, int64_t
     pps_utc_sec_out = s_last_nmea_utc_sec;
   }
 
-  // Если время уже синхронизировано, не принимаем резкие скачки
-  // кандидата UTC от PPS, чтобы отфильтровать поздние/битые NMEA.
-  // При auto_sync=false системные часы могут не обновляться, поэтому
-  // сравниваем с UTC-оценкой по текущему якорю, а не только с gettimeofday().
-  if (s_status.synced) {
-    int64_t current_us = 0;
-    if (!time_sync_esp_to_utc_us(pps_esp_us, current_us)) {
-      timeval tv{};
-      gettimeofday(&tv, nullptr);
-      current_us = (int64_t)tv.tv_sec * 1000000LL + (int64_t)tv.tv_usec;
-    }
+  // Jump guard защищает только ранее подтверждённую GPS UTC. RTC и GPS_PPS,
+  // полученный округлением RTC/system, могут ошибаться на секунды и минуты.
+  const bool confirmed_gps_anchor = s_status.source == TimeSource::GPS_PPS &&
+                                    s_gps_utc_confirmed;
+  int64_t current_us = 0;
+  if (s_status.synced && time_sync_esp_to_utc_us(pps_esp_us, current_us)) {
     int64_t candidate_us = (int64_t)pps_utc_sec_out * 1000000LL;
-    if (llabs(candidate_us - current_us) > kGpsCandidateJumpGuardUs) {
+    int64_t diff_us = llabs(candidate_us - current_us);
+    if (confirmed_gps_anchor && diff_us > kGpsCandidateJumpGuardUs) {
+      s_gps_utc_candidate = GpsUtcCandidate{};
+      return false;
+    }
+    if (!confirmed_gps_anchor && diff_us > 500000LL &&
+        !confirm_gps_utc_step(pps_esp_us, pps_utc_sec_out)) {
       return false;
     }
   }
+  s_gps_utc_candidate = GpsUtcCandidate{};
 
   // Анти-±1s коррекция: если свежий GPS anchor увереннее, чем знак delta,
   // поправляем выбранную NMEA секунду на один шаг.
   bool anchor_fresh = false;
-  if (s_status.source == TimeSource::GPS_PPS && s_status.last_pps_timestamp_us != 0) {
+  if (confirmed_gps_anchor && s_status.last_pps_timestamp_us != 0) {
     int64_t now_us = esp_timer_get_time();
-    anchor_fresh = (now_us - s_status.last_pps_timestamp_us) < kAnchorFreshnessUs;
+    int64_t age_us = now_us - s_status.last_pps_timestamp_us;
+    anchor_fresh = age_us >= 0 && age_us < kAnchorFreshnessUs;
   }
 
   if (anchor_fresh) {
@@ -573,6 +624,8 @@ static bool set_system_time_from_rtc_on_second_edge(uint32_t timeout_ms = 1500) 
 void time_sync_begin() {
   s_status = TimeSyncStatus{};
   s_last_synced_pps_us = 0;
+  s_gps_utc_confirmed = false;
+  s_gps_utc_candidate = GpsUtcCandidate{};
 
   s_last_pps_count = 0;
   s_have_nmea = false;
@@ -672,6 +725,7 @@ void time_sync_update() {
   if (!s_status.pps_locked) {
     // PPS пропал -> отменяем запланированную установку RTC по "следующему PPS"
     s_rtc_pps_pending = false;
+    s_gps_utc_candidate = GpsUtcCandidate{};
   }
 
   // ---------------------------------------------------------------------------
@@ -1003,6 +1057,7 @@ void time_sync_update() {
   int64_t  pps_time_us = 0;
   uint32_t pps_count   = 0;
   if (!pps_get_raw(pps_time_us, pps_count)) {
+    s_gps_utc_candidate = GpsUtcCandidate{};
     s_status.phase_aligned = false;
     notify_state_change_if_needed();
     return;
@@ -1025,6 +1080,7 @@ void time_sync_update() {
   int64_t pps_period_us = 0;
   int64_t pps_period_error_us = 0;
   if (!pps_interval_is_plausible(pps_time_us, pps_period_us, pps_period_error_us)) {
+    s_gps_utc_candidate = GpsUtcCandidate{};
     ESP_LOGW(TAG,
              "PPS rejected: bad interval period_us=%lld error_us=%lld last_accepted=%lld pps=%lld cnt=%lu candidate_sqw_utc_offset_us=%lld discarded=%d",
              (long long)pps_period_us,
@@ -1066,7 +1122,10 @@ void time_sync_update() {
   // GPS anchor всегда ставится ровно на PPS edge. Даже в GPS_DEGRADED это
   // сохраняет миллисекундную фазу меток событий, если номер секунды выведен.
   (void)accept_pps_sqw_offset(pps_sqw_sample, pps_time_us, pps_count);
+  const bool preserve_confirmed_utc = s_status.source == TimeSource::GPS_PPS &&
+                                      s_gps_utc_confirmed;
   set_anchor(TimeSource::GPS_PPS, (int64_t)utc_second * 1000000LL, pps_time_us);
+  s_gps_utc_confirmed = phase_aligned || preserve_confirmed_utc;
 
   // Одноразовая очистка RTC fallback guard'ов при возврате на GPS/PPS.
   if (s_in_rtc_fallback) {
