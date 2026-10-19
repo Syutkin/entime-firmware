@@ -51,6 +51,13 @@ const BadRequest kBad[] = {
   {R"({"cmd":"save_config","id":17,"data":{"sync":{"source":256}}})",103},
   {R"({"cmd":"save_config","id":17,"data":{"touch":{"calibration":[1,2,"bad",4,5]}}})",103},
   {R"({"cmd":"save_config","id":17,"data":{"wifi":{"passwd":true}}})",103},
+  {R"({"cmd":"save_config","id":17,"data":null})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"wifi":null}})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"device":{"number":null}}})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"wifi":{"passwd":null}}})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"device":{"number":22},"touch":{"enabled":null}}})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"touch":{"calibration":null,"cal0":123}}})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"touch":{"calibration":[1,2,null,4,5]}}})",103},
 };
 template <size_t Index> void rejected_request_has_no_side_effects() {
   seed(); const auto before = snapshot(); const auto nvs = host_project::nvs;
@@ -79,13 +86,47 @@ void malformed_json_returns_parser_error() {
   error(request("{broken"), 101);
   expect(snapshot() == before, "malformed JSON must not reach a handler");
 }
-void load_config_hides_password() {
-  seed(); const auto before = snapshot();
+template <bool Empty> void load_config_hides_password() {
+  seed();
+  if constexpr (Empty) {
+    auto wifi = settings.getWifi(); wifi.passwd = "";
+    require(settings.setWifi(wifi) && settings.save() > 0, "empty password must persist");
+  }
+  const auto saved = snapshot(); const auto nvs = host_project::nvs;
+  const auto writes = host_project::successful_writes;
   auto response = request(R"({"cmd":"load_config","id":"load"})");
   expect(response["status"] == "ok" && response["id"] == "load" &&
              response["data"]["device"]["name"] == "RaceTimer" &&
-             response["data"]["wifi"]["passwd"] == "", "load_config response and password policy");
-  expect(snapshot() == before, "read-only command must not modify stored password");
+             response["data"]["wifi"]["ssid"] == "Stored" &&
+             response["data"]["wifi"]["passwd"].isUnbound(),
+         "load_config must omit the password key, including for an open network");
+  expect(snapshot() == saved && host_project::nvs == nvs &&
+             host_project::successful_writes == writes,
+         "read-only command must not modify stored password");
+  JsonDocument saveRequest; saveRequest["cmd"] = "save_config";
+  saveRequest["data"] = response["data"];
+  std::string text; serializeJson(saveRequest, text);
+  response = request(text);
+  expect(response["status"] == "ok" && response["saved_keys"] == 0 &&
+             response["reboot_needed"] == false && snapshot() == saved &&
+             host_project::nvs == nvs && host_project::successful_writes == writes,
+         "saving an unmodified load_config response must preserve the password without writes");
+}
+template <bool Clear> void save_password_policy() {
+  seed();
+  auto response = request(R"({"cmd":"save_config","data":{"wifi":{"ssid":"Changed"}}})");
+  require(response["status"] == "ok" && settings.getWifi().passwd == "stored-pass",
+          "omitting password while changing WiFi settings must retain it");
+  response = request(Clear
+      ? R"({"cmd":"save_config","data":{"wifi":{"passwd":""}}})"
+      : R"({"cmd":"save_config","data":{"wifi":{"passwd":"new-pass"}}})");
+  expect(response["status"] == "ok" && response["saved_keys"] == 1 &&
+             response["reboot_needed"] == true &&
+             settings.getWifi().passwd == (Clear ? "" : "new-pass"),
+         "an explicit password string must replace or clear the saved password");
+  SettingsManager reboot; require(reboot.begin(), "updated password must reload");
+  expect(reboot.getWifi().passwd == (Clear ? "" : "new-pass") &&
+             reboot.getWifi().ssid == "Changed", "password update must survive reboot");
 }
 void no_op_save_does_not_write() {
   seed(); const auto nvs = host_project::nvs;
@@ -339,10 +380,17 @@ const Test kTests[] = {
   BAD(13,"config_boolean_string"), BAD(14,"config_group_array"),
   BAD(15,"config_integer_overflow"), BAD(16,"config_calibration_string"),
   BAD(17,"config_password_boolean"),
+  BAD(18,"config_data_null"), BAD(19,"config_group_null"),
+  BAD(20,"config_number_null"), BAD(21,"config_password_null"),
+  BAD(22,"config_late_null"), BAD(23,"config_calibration_null"),
+  BAD(24,"config_calibration_element_null"),
   {"router_ping_integer_id", ping_preserves_id<0>}, {"router_ping_zero_id", ping_preserves_id<1>},
   {"router_ping_string_id", ping_preserves_id<2>}, {"router_ping_boolean_id", ping_preserves_id<3>},
   {"router_ping_without_id", ping_without_id}, {"router_malformed_json", malformed_json_returns_parser_error},
-  {"router_load_config_preserves_password", load_config_hides_password},
+  {"router_load_config_preserves_password", load_config_hides_password<false>},
+  {"router_load_config_omits_empty_password", load_config_hides_password<true>},
+  {"router_save_password_replace", save_password_policy<false>},
+  {"router_save_password_clear", save_password_policy<true>},
   {"router_noop_save_no_writes", no_op_save_does_not_write},
   REBOOT(0,"name"), REBOOT(1,"number"), REBOOT(2,"role"), REBOOT(3,"wifi_active"),
   REBOOT(4,"wifi_ssid"), REBOOT(5,"wifi_password"), REBOOT(6,"gps_enabled"),

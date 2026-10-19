@@ -402,7 +402,7 @@ void cmdLoadConfig(JsonDocument& request, Stream& output) {
 }
 
 void cmdSaveConfig(JsonDocument& request, Stream& output) {
-    if (request["data"].isNull()) {
+    if (request["data"].isUnbound()) {
         sendError("save_config", 102, "Missing 'data' field", request["id"], output);
         ESP_LOGW(TAG, "Save_config failed: missing data");
         return;

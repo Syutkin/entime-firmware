@@ -617,9 +617,7 @@ JsonDocument SettingsManager::toJson() const {
   // WiFi settings
   doc["wifi"]["active"] = settings_.wifi.active;
   doc["wifi"]["ssid"] = settings_.wifi.ssid;
-  // doc["wifi"]["passwd"] = settings_.wifi.passwd;
-  // Do not show wifi password
-  doc["wifi"]["passwd"] = "";
+  // WiFi password is write-only and is omitted from configuration responses.
 
   // GPS settings
   doc["gps"]["enabled"] = settings_.gps.enabled;
@@ -636,8 +634,8 @@ JsonDocument SettingsManager::toJson() const {
 }
 
 template <typename T>
-static bool checkOptionalJsonType(JsonVariantConst value, const char *field) {
-  if (value.isNull() || value.is<T>())
+static bool checkJsonType(JsonVariantConst value, const char *field) {
+  if (value.is<T>())
     return true;
   ESP_LOGE(TAG, "Invalid %s: unexpected JSON type or out-of-range value",
            field);
@@ -645,10 +643,15 @@ static bool checkOptionalJsonType(JsonVariantConst value, const char *field) {
 }
 
 template <typename T>
+static bool checkOptionalJsonType(JsonVariantConst value, const char *field) {
+  return value.isUnbound() || checkJsonType<T>(value, field);
+}
+
+template <typename T>
 static bool readJsonSetting(JsonVariantConst value, T &target,
                             const char *field) {
-  // Сохраняем существующую обработку отсутствующих значений и null.
-  if (value.isNull())
+  // Отсутствующее поле сохраняет прежнее значение; явный null недопустим.
+  if (value.isUnbound())
     return true;
   if (!checkOptionalJsonType<T>(value, field))
     return false;
@@ -657,8 +660,7 @@ static bool readJsonSetting(JsonVariantConst value, T &target,
 }
 
 bool SettingsManager::fromJson(const JsonDocument &doc) {
-  if (!checkOptionalJsonType<JsonObjectConst>(doc.as<JsonVariantConst>(),
-                                              "settings"))
+  if (!checkJsonType<JsonObjectConst>(doc.as<JsonVariantConst>(), "settings"))
     return false;
   for (const char *group : {"device", "sync", "wifi", "gps", "touch"}) {
     if (!checkOptionalJsonType<JsonObjectConst>(doc[group], group))
@@ -719,7 +721,12 @@ bool SettingsManager::fromJson(const JsonDocument &doc) {
         !readJsonSetting(doc["touch"]["cal_valid"], touch.calibration.valid,
                          "touch.cal_valid"))
       return false;
-    if (!doc["touch"]["calibration"].isNull()) {
+    // Проверяем совместимые поля даже при наличии приоритетного массива.
+    for (const char *key : {"cal0", "cal1", "cal2", "cal3", "cal4"}) {
+      if (!checkOptionalJsonType<uint16_t>(doc["touch"][key], key))
+        return false;
+    }
+    if (!doc["touch"]["calibration"].isUnbound()) {
       if (!checkOptionalJsonType<JsonArrayConst>(doc["touch"]["calibration"],
                                                  "touch.calibration"))
         return false;
@@ -728,7 +735,7 @@ bool SettingsManager::fromJson(const JsonDocument &doc) {
       if (cal_array.size() != 5)
         return false;
       for (uint8_t i = 0; i < 5; ++i) {
-        if (!checkOptionalJsonType<uint16_t>(cal_array[i], "touch.calibration"))
+        if (!checkJsonType<uint16_t>(cal_array[i], "touch.calibration"))
           return false;
         touch.calibration.data[i] = cal_array[i].as<uint16_t>();
       }

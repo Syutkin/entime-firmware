@@ -96,22 +96,22 @@ std::string field_json(const JsonField &field, const char *value) {
 }
 template <size_t Index> void group_requires_object() {
   seed();
-  for (const char *value : {"[]","false","42","\"bad\""})
+  for (const char *value : {"null","[]","false","42","\"bad\""})
     expect_rejected_without_changes(std::string("{\"") + kGroups[Index] + "\":" + value + "}");
 }
 template <size_t Index> void boolean_requires_boolean() {
   seed();
-  for (const char *value : {"\"false\"","0","1","[]","{}","1.5"})
+  for (const char *value : {"null","\"false\"","0","1","[]","{}","1.5"})
     expect_rejected_without_changes(field_json(kBooleans[Index], value));
 }
 template <size_t Index> void string_requires_string() {
   seed();
-  for (const char *value : {"false","0","[]","{}"})
+  for (const char *value : {"null","false","0","[]","{}"})
     expect_rejected_without_changes(field_json(kStrings[Index], value));
 }
 template <size_t Index> void integer_requires_integer() {
   seed();
-  for (const char *value : {"\"1\"","true","[]","{}","1.5","1.0"})
+  for (const char *value : {"null","\"1\"","true","[]","{}","1.5","1.0"})
     expect_rejected_without_changes(field_json(kIntegers[Index], value));
   if constexpr (Index >= 4) {
     for (const char *value : {"-1","65536"})
@@ -120,7 +120,7 @@ template <size_t Index> void integer_requires_integer() {
 }
 template <unsigned Position> void calibration_element_requires_uint16() {
   seed();
-  for (const char *value : {"\"5\"","true","[]","{}","1.5","-1","65536"}) {
+  for (const char *value : {"null","\"5\"","true","[]","{}","1.5","-1","65536"}) {
     std::string text = "{\"touch\":{\"calibration\":[";
     for (unsigned i = 0; i < 5; ++i) {
       if (i) text += ',';
@@ -131,7 +131,7 @@ template <unsigned Position> void calibration_element_requires_uint16() {
 }
 void root_requires_object() {
   seed();
-  for (const char *value : {"[]","true","42","\"bad\""})
+  for (const char *value : {"null","[]","true","42","\"bad\""})
     expect_rejected_without_changes(value);
 }
 void out_of_storage_range_is_rejected() {
@@ -152,6 +152,23 @@ void later_type_error_preserves_all_groups() {
     R"({"device":{"number":22},"wifi":{"passwd":"changed-pass"},"touch":{"calibration":[1,2,3,4,"bad"]}})",
   };
   for (const char *value : values) expect_rejected_without_changes(value);
+}
+void null_calibration_is_rejected_without_legacy_fallback() {
+  seed();
+  expect_rejected_without_changes(R"({"touch":{"calibration":null}})");
+  expect_rejected_without_changes(R"({"device":{"number":22},"touch":{"calibration":null,"cal0":123}})");
+}
+template <unsigned Index> void null_legacy_calibration_is_rejected_with_array() {
+  seed();
+  JsonDocument doc;
+  require(!deserializeJson(doc, R"({"touch":{"calibration":[1,2,3,4,5]}})"), "valid calibration");
+  doc["touch"][kIntegers[Index + 4].key] = nullptr;
+  std::string text; serializeJson(doc, text);
+  expect_rejected_without_changes(text);
+}
+void late_null_preserves_all_groups() {
+  seed();
+  expect_rejected_without_changes(R"({"device":{"number":22},"sync":{"auto":false},"wifi":{"passwd":"changed"},"gps":{"enabled":false},"touch":{"enabled":null}})");
 }
 void calibration_array_accepts_uint16_boundaries() {
   seed();
@@ -299,6 +316,13 @@ const Test kTests[] = {
   {"settings_calibration_element_4_strict", calibration_element_requires_uint16<4>},
   {"settings_storage_range_checked_before_conversion", out_of_storage_range_is_rejected},
   {"settings_later_type_error_preserves_all_groups", later_type_error_preserves_all_groups},
+  {"settings_null_calibration_no_fallback", null_calibration_is_rejected_without_legacy_fallback},
+  {"settings_null_cal0_with_array", null_legacy_calibration_is_rejected_with_array<0>},
+  {"settings_null_cal1_with_array", null_legacy_calibration_is_rejected_with_array<1>},
+  {"settings_null_cal2_with_array", null_legacy_calibration_is_rejected_with_array<2>},
+  {"settings_null_cal3_with_array", null_legacy_calibration_is_rejected_with_array<3>},
+  {"settings_null_cal4_with_array", null_legacy_calibration_is_rejected_with_array<4>},
+  {"settings_late_null_is_atomic", late_null_preserves_all_groups},
   {"settings_calibration_array_uint16_boundaries", calibration_array_accepts_uint16_boundaries},
   {"settings_legacy_cal0_uint16_boundaries", legacy_calibration_accepts_uint16_boundaries<0>},
   {"settings_legacy_cal1_uint16_boundaries", legacy_calibration_accepts_uint16_boundaries<1>},
