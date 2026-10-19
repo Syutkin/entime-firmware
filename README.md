@@ -82,4 +82,7 @@ Host-тесты без платы ESP32:
 python3 test/run_host_tests.py
 ```
 
-Структура, запуск с UBSan и известные дефекты описаны в [test/README.md](test/README.md).
+Структура и запуск с UBSan описаны в [test/README.md](test/README.md).
+
+GitHub Actions запускает host-тесты с UBSan и `--strict`, а также сборку прошивки
+ESP32-S3 на каждый push и pull request. Workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml).

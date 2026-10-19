@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Host tests (UBSan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Run host tests
+        env:
+          CXX: g++
+        run: python3 test/run_host_tests.py --sanitize --strict
+
+  firmware:
+    name: ESP32-S3 firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PLATFORMIO_VERSION: '6.1.19'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Cache PlatformIO dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/platforms
+            ~/.platformio/packages
+            .pio/libdeps
+          key: ${{ runner.os }}-pio-${{ env.PLATFORMIO_VERSION }}-${{ hashFiles('platformio.ini', 'scripts/post_compiledb.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-${{ env.PLATFORMIO_VERSION }}-
+
+      - name: Install PlatformIO
+        run: python3 -m pip install "platformio==${PLATFORMIO_VERSION}"
+
+      - name: Build firmware
+        run: pio run --environment rymcu-esp32-s3-devkitc-1
