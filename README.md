@@ -47,6 +47,7 @@
 - [TIMESYNC.md](doc/TIMESYNC.md) — алгоритм GPS/RTC синхронизации времени
 - [BOM.md](doc/BOM.md) — список компонентов
 - [TODO.md](TODO.md) — ближайшие задачи
+- [CHANGELOG.md](CHANGELOG.md) — история изменений
 
 ## Лицензия
 

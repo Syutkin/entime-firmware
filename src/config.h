@@ -7,7 +7,7 @@
 
 #include "runtime/build_info.h"
 
-#define VERSION "0.1.1"
+#define VERSION "0.2.0"
 #define HARDWARE "v1"
 #define PROTOCOL "v1"
 #define FIRMWARE_BUILD_DATE firmware_build_date_iso()

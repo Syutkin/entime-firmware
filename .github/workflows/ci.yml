@@ -13,6 +13,8 @@ jobs:
     name: Host tests (UBSan) and ESP32-S3 firmware
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      release_ready: ${{ steps.upload_release.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -30,7 +32,7 @@ jobs:
             ~/.platformio/platforms
             ~/.platformio/packages
             .pio/libdeps
-          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini', 'scripts/post_compiledb.py') }}
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini', 'scripts/post_compiledb.py', 'scripts/release_metadata.py') }}
           restore-keys: |
             ${{ runner.os }}-pio-
 
@@ -44,9 +46,66 @@ jobs:
       - name: Build firmware
         run: pio run --environment rymcu-esp32-s3-devkitc-1
 
+      - name: Prepare release files
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          python3 scripts/prepare_release.py
+          --metadata .pio/build/rymcu-esp32-s3-devkitc-1/release-metadata.json
+          --tag "$RELEASE_TAG"
+          --output .pio/release
+
+      # Save the successful build before host tests, which may fail independently.
+      - name: Upload release files
+        id: upload_release
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ github.ref_name }}
+          path: .pio/release/*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Test release packaging
+        run: python3 -B -m unittest discover -s test/release -v
+
       - name: Run host tests
         # The build installs missing dependencies; still test after compiler errors.
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         env:
           CXX: g++
         run: python3 test/run_host_tests.py --environment rymcu-esp32-s3-devkitc-1 --sanitize --strict
+
+  release:
+    name: Publish GitHub Release
+    needs: firmware
+    # An explicit status condition allows publication when only host tests failed.
+    if: ${{ !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.firmware.outputs.release_ready == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-${{ github.ref_name }}
+          path: release
+
+      - name: Verify release files
+        working-directory: release
+        run: sha256sum --check SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            "release/entime-${RELEASE_TAG}-firmware.bin" \
+            "release/entime-${RELEASE_TAG}-full.bin" \
+            release/SHA256SUMS \
+            --repo "$GH_REPO" --verify-tag \
+            --title "ENTime $RELEASE_TAG" --notes-file release/release-notes.md
