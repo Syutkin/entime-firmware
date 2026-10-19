@@ -112,6 +112,19 @@ void rtc_validation_latency_does_not_shift_anchor() {
   establish_rtc_anchor();
   rtc.validation_delay_us = 5000;
   process_sqw(10, 20);
+  const int64_t expected_utc_us =
+      static_cast<int64_t>(kBaseUtcSec) * kSecondUs + host::clock.now_us -
+      kBaseEspUs;
+  expect_error_at_most(event_utc_us(host::clock.now_us), expected_utc_us, 1000);
+}
+
+void rtc_initial_validation_latency_does_not_shift_anchor() {
+  reset();
+  settings.sync.source = 2;
+  rtc.ready = true;
+  rtc.validation_delay_us = 5000;
+  // Initial acquisition must not include I2C validation latency in UTC.
+  process_sqw(1, 11);
   // Compare against independent ideal UTC, not a potentially adjusted system.
   const int64_t expected_utc_us =
       static_cast<int64_t>(kBaseUtcSec) * kSecondUs + host::clock.now_us -
@@ -162,10 +175,11 @@ const Test kTests[] = {
      gps_replaces_one_second_holdover_error},
     {"missed_rtc_write_target_is_rescheduled",
      missed_rtc_write_target_is_rescheduled},
-    {"rtc_limits_monotonic_clock_drift", rtc_limits_monotonic_clock_drift,
-     "TS004"},
+    {"rtc_limits_monotonic_clock_drift", rtc_limits_monotonic_clock_drift},
     {"rtc_validation_latency_does_not_shift_anchor",
-     rtc_validation_latency_does_not_shift_anchor, "TS005"},
+     rtc_validation_latency_does_not_shift_anchor},
+    {"rtc_initial_validation_latency_does_not_shift_anchor",
+     rtc_initial_validation_latency_does_not_shift_anchor, "TS005"},
     {"external_rtc_correction_updates_event_time",
      external_rtc_correction_updates_event_time, "TS006"},
     {"sqw_extra_edge_does_not_add_utc_second",

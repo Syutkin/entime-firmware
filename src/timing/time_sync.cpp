@@ -34,7 +34,7 @@ static constexpr int64_t kMaxHoldoffUs = 30000000;
 // Почти ±1s допустимы, но мертвая зона около ровно 1s обрабатывается отдельно.
 static constexpr int64_t kPhaseWindowUs = 990000;
 
-// RTC fallback: как часто заново строить SQW anchor из системного/RTC времени.
+// RTC fallback: период проверки RTC и обновления грубой UTC привязки.
 static constexpr int64_t kRtcResyncPeriodUs = 10000000; // 10 секунд
 static int64_t s_last_rtc_resync_us = 0;
 static constexpr uint8_t kRtcFallbackWarmupTicks = 3;
@@ -840,10 +840,10 @@ void time_sync_update() {
         // -----------------------------------------------------------------------
         // 3.1) RTC reanchor.
         //
-        // Предпочитаем системное UTC время, потому что до потери PPS оно уже было
-        // дисциплинировано GPS. Если оно невалидно или auto_sync=false, берем RTC.
-        // В обоих случаях, если известен PPS/SQW offset, переносим SQW edge на
-        // правильную фазу UTC секунды.
+        // Системное UTC используем только для первичной привязки: до потери
+        // PPS оно было дисциплинировано GPS. При непрерывном SQW номер секунды
+        // продолжаем по счетчику, иначе дрейф ESP возвращался бы в RTC anchor.
+        // При auto_sync=false грубую секунду периодически сверяем с самим RTC.
         // -----------------------------------------------------------------------
         const bool have_rtc_anchor = have_rtc_time_anchor();
 
@@ -902,7 +902,11 @@ void time_sync_update() {
           int64_t rtc_utc_us = 0;
           const char *anchor_source = "system";
 
-          if (system_time_at_esp_time_us(sqw_edge_us, now_us, rtc_utc_us)) {
+          if (auto_sync_enabled && have_rtc_anchor && s_rtc_anchor_sqw_count != 0) {
+            const uint32_t seconds = sqw_count - s_rtc_anchor_sqw_count;
+            rtc_utc_us = s_status.anchor_utc_us + (int64_t)seconds * 1000000LL;
+            anchor_source = "sqw";
+          } else if (system_time_at_esp_time_us(sqw_edge_us, now_us, rtc_utc_us)) {
             rtc_utc_us = apply_known_sqw_utc_offset(rtc_utc_us);
             anchor_source = s_have_rtc_sqw_utc_offset ? "system+sqw_offset" : "system";
           } else {
@@ -963,6 +967,12 @@ void time_sync_update() {
         // -----------------------------------------------------------------------
         int32_t d = (int32_t)(sqw_count - s_rtc_anchor_sqw_count); // signed delta
         int64_t edge_utc_us = s_status.anchor_utc_us + (int64_t)d * 1000000LL;
+
+        // Метки событий должны интерполироваться от последнего SQW, а не от
+        // anchor десятисекундной давности. Тогда дрейф esp_timer ограничен
+        // интервалом между соседними фронтами и не накапливается в UTC.
+        set_anchor(TimeSource::RTC, edge_utc_us, sqw_edge_us);
+        s_rtc_anchor_sqw_count = sqw_count;
 
         // target_us - UTC оценка на момент текущей обработки loop().
         int64_t target_us = edge_utc_us + age_us;
