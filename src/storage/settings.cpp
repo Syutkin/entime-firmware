@@ -665,13 +665,14 @@ bool SettingsManager::fromJson(const JsonDocument &doc) {
       return false;
   }
 
-  // Изменения применяются только после проверки всех групп.
+  // Создать временные структуры и обновить их данными из JSON
   DeviceSettings device = settings_.device;
   SyncSettings sync = settings_.sync;
   WifiSettings wifi = settings_.wifi;
   GpsSettings gps = settings_.gps;
   TouchSettings touch = settings_.touch;
 
+  // Device settings
   if (!doc["device"].isNull()) {
     if (!readJsonSetting(doc["device"]["name"], device.name, "device.name") ||
         !readJsonSetting(doc["device"]["number"], device.number,
@@ -684,6 +685,7 @@ bool SettingsManager::fromJson(const JsonDocument &doc) {
       return false;
   }
 
+  // Sync settings
   if (!doc["sync"].isNull()) {
     if (!readJsonSetting(doc["sync"]["auto"], sync.auto_sync, "sync.auto") ||
         !readJsonSetting(doc["sync"]["source"], sync.source, "sync.source") ||
@@ -694,6 +696,7 @@ bool SettingsManager::fromJson(const JsonDocument &doc) {
       return false;
   }
 
+  // WiFi settings
   if (!doc["wifi"].isNull()) {
     if (!readJsonSetting(doc["wifi"]["active"], wifi.active, "wifi.active") ||
         !readJsonSetting(doc["wifi"]["ssid"], wifi.ssid, "wifi.ssid") ||
@@ -702,12 +705,14 @@ bool SettingsManager::fromJson(const JsonDocument &doc) {
       return false;
   }
 
+  // GPS settings
   if (!doc["gps"].isNull()) {
     if (!readJsonSetting(doc["gps"]["enabled"], gps.enabled, "gps.enabled") ||
         !validateGps(gps))
       return false;
   }
 
+  // Touch settings
   if (!doc["touch"].isNull()) {
     if (!readJsonSetting(doc["touch"]["enabled"], touch.enabled,
                          "touch.enabled") ||
@@ -744,6 +749,7 @@ bool SettingsManager::fromJson(const JsonDocument &doc) {
       return false;
   }
 
+  // Если все валидации прошли - применить изменения
   settings_.device = device;
   settings_.sync = sync;
   settings_.wifi = wifi;
