@@ -207,10 +207,93 @@ void gsv_bad_checksum_ignored() {
 }
 void gsv_empty_snr() {
   begin(); feed(gsv(1,"GP","")); GPSSatelliteInfo out[1];
-  expect(gps.satellites(out,1)==1 && out[0].snr_db==-1, "empty SNR must be represented as unknown");
+  expect(gps.satellites(out,1)==1 && out[0].snr_db==-1 && out[0].prn==1 &&
+             out[0].elevation_deg==40 && out[0].azimuth_deg==100 &&
+             std::string(out[0].talker)=="GP" && out[0].last_seen_us==10000000,
+         "empty SNR must retain the satellite with unknown signal strength");
+}
+
+template <unsigned Count> void gsv_multiple_unknown_snr() {
+  begin();
+  std::string body = "GPGSV,1,1," + std::to_string(Count);
+  for (unsigned prn = 1; prn <= Count; ++prn)
+    body += "," + std::to_string(prn) + ",40,100,";
+  feed(nmea(body));
+  GPSSatelliteInfo out[4];
+  expect(gps.satellites(out,4)==Count, "all satellites with empty SNR must be retained");
+  for (unsigned i = 0; i < Count; ++i)
+    expect(out[i].prn==i+1 && out[i].snr_db==-1 && out[i].last_seen_us==10000000,
+           "empty middle and final SNR fields must preserve ordering and freshness");
+}
+
+void gsv_mixed_snr_preserves_zero_and_unknown() {
+  begin(); feed(nmea("GPGSV,1,1,3,1,40,100,0,2,30,200,35,3,20,300,"));
+  GPSSatelliteInfo out[3];
+  expect(gps.satellites(out,3)==3 && out[0].snr_db==0 && out[1].snr_db==35 &&
+             out[2].snr_db==-1 && out[2].prn==3,
+         "numeric zero must remain distinct from the unknown SNR of the final satellite");
+}
+
+void gsv_snr_can_become_unknown_and_recover() {
+  begin(); feed(gsv(1,"GL","35"));
+  feed(gsv(1,"GL",""),11000000);
+  GPSSatelliteInfo out[2];
+  expect(gps.satellites(out,2)==1 && out[0].snr_db==-1 && out[0].last_seen_us==11000000,
+         "empty SNR must replace a previously known value and refresh the same satellite");
+  feed(gsv(1,"GL","42"),12000000);
+  expect(gps.satellites(out,2)==1 && out[0].snr_db==42 && out[0].last_seen_us==12000000 &&
+             std::string(out[0].talker)=="GL",
+         "restored SNR must update the existing satellite without duplication");
+}
+
+void gsv_last_message_can_end_with_unknown_snr() {
+  begin(); feed(nmea("GPGSV,2,1,5,1,40,100,30,2,40,110,31,3,40,120,32,4,40,130,33"));
+  feed(nmea("GPGSV,2,2,5,5,30,200,"),11000000);
+  GPSSatelliteInfo out[5]; int64_t stamp = 0;
+  expect(gps.satellites(out,5)==5 && out[4].prn==5 && out[4].snr_db==-1 &&
+             out[4].last_seen_us==11000000 && out[0].last_seen_us==10000000 &&
+             gps.lastGsvUs(stamp) && stamp==11000000,
+         "last multipart GSV message must retain its final satellite without altering earlier entries");
+}
+
+void gsv_missing_fields_do_not_create_satellites() {
+  begin();
+  const char *bodies[] = {
+    "GPGSV,1,1,1,", "GPGSV,1,1,1,1,", "GPGSV,1,1,1,1,40,", "GPGSV,1,1,1,1,40,100"
+  };
+  GPSSatelliteInfo out[1];
+  for (const char *body : bodies) {
+    feed(nmea(body));
+    expect(gps.satellites(out,1)==0,
+           "missing PRN, elevation, azimuth or SNR separator must not create a satellite");
+  }
+}
+
+void gsv_optional_checksum_with_empty_snr() {
+  begin(); feed("$GPGSV,1,1,1,1,40,100,\r\n");
+  GPSSatelliteInfo out[1];
+  expect(gps.satellites(out,1)==1 && out[0].snr_db==-1,
+         "empty final SNR must also work in the supported checksum-free GSV format");
+}
+
+void gsv_empty_snr_bad_checksum_preserves_cache() {
+  begin(); feed(gsv(1,"GP","35"));
+  feed(corrupt_checksum(gsv(1,"GP","")),11000000);
+  GPSSatelliteInfo out[1]; int64_t stamp = 0;
+  expect(gps.satellites(out,1)==1 && out[0].snr_db==35 && out[0].last_seen_us==10000000 &&
+             gps.lastGsvUs(stamp) && stamp==10000000,
+         "bad checksum with empty SNR must preserve the prior satellite and GSV timestamp");
 }
 
 const Test kTests[] = {
+  {"gps_gsv_two_unknown_snr",gsv_multiple_unknown_snr<2>},
+  {"gps_gsv_four_unknown_snr",gsv_multiple_unknown_snr<4>},
+  {"gps_gsv_mixed_zero_known_unknown_snr",gsv_mixed_snr_preserves_zero_and_unknown},
+  {"gps_gsv_unknown_snr_updates_and_recovers",gsv_snr_can_become_unknown_and_recover},
+  {"gps_gsv_multipart_last_unknown_snr",gsv_last_message_can_end_with_unknown_snr},
+  {"gps_gsv_missing_fields_not_satellites",gsv_missing_fields_do_not_create_satellites},
+  {"gps_gsv_optional_checksum_empty_snr",gsv_optional_checksum_with_empty_snr},
+  {"gps_gsv_bad_checksum_empty_snr_preserves_cache",gsv_empty_snr_bad_checksum_preserves_cache},
   {"gps_bad_checksum_preserves_all_timestamps",bad_sentence_preserves_all_trusted_timestamps},
   {"gps_bad_checksum_stream_expires_then_recovers",repeated_bad_sentences_expire_and_valid_fix_recovers},
   {"gps_first_sentence_bad_checksum",invalid_first_sentence_cannot_create_fix<0>},
@@ -241,7 +324,7 @@ const Test kTests[] = {
   {"gps_gsv_future_timestamp_rejected",gsv_freshness<-1,false>},
   {"gps_gsv_capacity_and_bounds",gsv_capacity_and_output_bounds},
   {"gps_gsv_bad_checksum",gsv_bad_checksum_ignored},
-  {"gps_gsv_unknown_snr",gsv_empty_snr,"AU012"},
+  {"gps_gsv_unknown_snr",gsv_empty_snr},
 };
 }
 int main(int argc,char **argv) { return run_tests(argc,argv,kTests); }

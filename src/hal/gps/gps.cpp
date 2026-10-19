@@ -338,7 +338,13 @@ void GPS::parseGsvSentence_(const char* sentence, int64_t now_us) {
             !parseIntField_(field, azimuth)) {
             break;
         }
-        if (!readNmeaField_(cursor, field, sizeof(field))) {
+        // Запятая после азимута обязательна даже при пустом последнем SNR.
+        if (cursor[-1] != ',') {
+            break;
+        }
+        if (*cursor == '*' || *cursor == '\0') {
+            field[0] = '\0';
+        } else if (!readNmeaField_(cursor, field, sizeof(field))) {
             break;
         }
         if (field[0] != '\0') {
