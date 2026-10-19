@@ -108,12 +108,29 @@ bool Touch::isPressed() const {
 
 void Touch::setRotation(uint8_t rotation) { _rotation = rotation; }
 
+void Touch::applySettings(const TouchSettings &settings) {
+  if (!_initialized)
+    return;
+
+  if (_enabled != settings.enabled) {
+    _enabled = settings.enabled;
+    resetState_();
+  }
+
+  bool calibrationChanged = _calibration.valid != settings.calibration.valid;
+  for (uint8_t i = 0; i < 5; ++i)
+    calibrationChanged |= _calibration.data[i] != settings.calibration.data[i];
+  if (calibrationChanged)
+    applyCalibration(settings.calibration);
+}
+
 bool Touch::applyCalibration(const TouchCalibration &cal) {
   if (!_tft) {
     _calibrated = false;
     return false;
   }
 
+  _calibration = cal;
   if (!cal.valid) {
     _calibrated = false;
     resetState_();

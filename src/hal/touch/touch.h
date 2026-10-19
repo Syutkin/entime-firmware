@@ -32,6 +32,7 @@ public:
   bool isPressed() const;
 
   void setRotation(uint8_t rotation);
+  void applySettings(const TouchSettings &settings);
   bool applyCalibration(const TouchCalibration &cal);
   bool calibrate(TouchCalibration &outCalibration);
 
@@ -57,6 +58,7 @@ private:
   bool _initialized = false;
   bool _enabled = false;
   bool _calibrated = false;
+  TouchCalibration _calibration;
   uint8_t _rotation = 0;
 
   State _state = State::Idle;

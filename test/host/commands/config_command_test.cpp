@@ -55,7 +55,7 @@ void touch_disable_applies_immediately() {
   auto response = save(R"({"data":{"touch":{"enabled":false}}})");
   require(response["status"] == "ok" && !settings.getTouch().enabled,
           "disable command must be accepted");
-  expect(!generate_press(tft), "AU006: disabled touch must stop generating presses");
+  expect(!generate_press(tft), "disabled touch must stop generating presses");
 }
 
 void touch_enable_applies_immediately() {
@@ -64,7 +64,7 @@ void touch_enable_applies_immediately() {
   auto response = save(R"({"data":{"touch":{"enabled":true}}})");
   require(response["status"] == "ok" && settings.getTouch().enabled,
           "enable command must be accepted");
-  expect(generate_press(tft), "AU006: enabled touch must start generating presses");
+  expect(generate_press(tft), "enabled touch must start generating presses");
 }
 
 void calibration_applies_immediately() {
@@ -73,7 +73,93 @@ void calibration_applies_immediately() {
   auto response = save(R"({"data":{"touch":{"calibration":[200,300,400,500,1]}}})");
   require(response["status"] == "ok", "calibration command must be accepted");
   expect(tft.calibration == std::array<uint16_t, 5>{200,300,400,500,1},
-         "AU006: accepted calibration must reach the active touch driver");
+         "accepted calibration must reach the active touch driver");
+}
+
+void disabling_touch_discards_pending_gesture() {
+  setup(); TFT_eSPI tft; touch.begin(tft, settings.getTouch(), 0);
+  tft.pressed = true;
+  for (unsigned i = 0; i < 4; ++i) { host_project::now_ms += 16; touch.update(); }
+  require(touch.isPressed(), "touch must hold a queued Press before disabling");
+  auto response = save(R"({"data":{"touch":{"enabled":false}}})");
+  TouchEvent event;
+  expect(response["status"] == "ok" && !touch.isPressed() && !touch.pollEvent(event),
+         "disable must clear the active gesture and queued events immediately");
+  const auto reads = tft.reads;
+  expect(!generate_press(tft) && tft.reads == reads,
+         "disabled touch must stop reading hardware");
+}
+
+void unrelated_and_noop_save_preserve_active_touch() {
+  setup(); TFT_eSPI tft; touch.begin(tft, settings.getTouch(), 0);
+  require(generate_press(tft), "touch must be pressed before unrelated save");
+  const auto applied = tft.applied_calls;
+  auto response = save(R"({"data":{"device":{"timezone_offset_min":0}}})");
+  expect(response["status"] == "ok" && touch.isPressed() && tft.applied_calls == applied,
+         "unrelated settings must not interrupt touch or reapply calibration");
+  response = save(R"({"data":{}})");
+  expect(response["saved_keys"] == 0 && touch.isPressed() &&
+             tft.applied_calls == applied && !generate_press(tft),
+         "no-op save must preserve a held gesture without another Press");
+}
+
+void clearing_calibration_validity_blocks_touch() {
+  setup(); TFT_eSPI tft; touch.begin(tft, settings.getTouch(), 0);
+  auto response = save(R"({"data":{"touch":{"cal_valid":false}}})");
+  expect(response["status"] == "ok" && response["reboot_needed"] == false &&
+             !touch.isCalibrated() && !generate_press(tft),
+         "invalidated calibration must block input immediately without reboot");
+}
+
+void restoring_calibration_validity_restores_touch() {
+  setup(); TFT_eSPI tft; touch.begin(tft, settings.getTouch(), 0);
+  require(save(R"({"data":{"touch":{"cal_valid":false}}})")["status"] == "ok",
+          "calibration must first be invalidated");
+  auto response = save(R"({"data":{"touch":{"cal_valid":true}}})");
+  expect(response["status"] == "ok" && touch.isCalibrated() && generate_press(tft),
+         "restoring calibration validity must unblock input immediately");
+}
+
+template <bool Calibration> void failed_touch_save_does_not_apply_and_can_retry() {
+  setup(); TFT_eSPI tft; touch.begin(tft, settings.getTouch(), 0);
+  const auto applied = tft.applied_calls;
+  const char *json = Calibration
+      ? R"({"data":{"touch":{"calibration":[200,300,400,500,1]}}})"
+      : R"({"data":{"touch":{"enabled":false}}})";
+  host_project::write_fails = true;
+  auto response = save(json);
+  require(host_project::failed_writes > 0, "touch NVS write must actually fail");
+  expect(response["status"] == "error" && tft.applied_calls == applied &&
+             tft.calibration[0] == 100 && generate_press(tft),
+         "failed save must preserve the active touch configuration");
+  host_project::write_fails = false;
+  response = save(json);
+  expect(response["status"] == "ok", "retry after NVS recovery must succeed");
+  if constexpr (Calibration)
+    expect(tft.calibration == std::array<uint16_t,5>{200,300,400,500,1} &&
+               tft.applied_calls == applied + 1,
+           "retry must apply calibration even if settings RAM was updated earlier");
+  else
+    expect(!touch.isPressed() && !generate_press(tft),
+           "retry must disable touch even if settings RAM was updated earlier");
+}
+
+void touch_settings_before_driver_initialization() {
+  setup();
+  auto response = save(R"({"data":{"touch":{"calibration":[200,300,400,500,1]}}})");
+  expect(response["status"] == "ok" && !touch.isReady(),
+         "saving settings must not initialize an absent touch driver");
+  TFT_eSPI tft; touch.begin(tft, settings.getTouch(), 0);
+  expect(tft.calibration == std::array<uint16_t,5>{200,300,400,500,1} && generate_press(tft),
+         "later initialization must use the saved configuration");
+}
+
+void enabling_touch_applies_new_calibration_together() {
+  setup(false); TFT_eSPI tft; touch.begin(tft, settings.getTouch(), 0);
+  auto response = save(R"({"data":{"touch":{"enabled":true,"calibration":[200,300,400,500,1]}}})");
+  expect(response["status"] == "ok" && response["reboot_needed"] == false &&
+             tft.calibration == std::array<uint16_t,5>{200,300,400,500,1} && generate_press(tft),
+         "enable and calibration must both take effect in the same command");
 }
 
 void storage_failure_returns_error() {
@@ -110,9 +196,17 @@ void enabled_touch_generates_press() {
 }
 
 const Test kTests[] = {
-  {"save_config_disables_touch_immediately", touch_disable_applies_immediately, "AU006"},
-  {"save_config_enables_touch_immediately", touch_enable_applies_immediately, "AU006"},
-  {"save_config_applies_touch_calibration", calibration_applies_immediately, "AU006"},
+  {"save_config_disable_discards_touch_gesture", disabling_touch_discards_pending_gesture},
+  {"save_config_noop_preserves_active_touch", unrelated_and_noop_save_preserve_active_touch},
+  {"save_config_invalid_calibration_blocks_touch", clearing_calibration_validity_blocks_touch},
+  {"save_config_restore_calibration_restores_touch", restoring_calibration_validity_restores_touch},
+  {"save_config_touch_disable_failure_and_retry", failed_touch_save_does_not_apply_and_can_retry<false>},
+  {"save_config_touch_calibration_failure_and_retry", failed_touch_save_does_not_apply_and_can_retry<true>},
+  {"save_config_touch_before_driver_init", touch_settings_before_driver_initialization},
+  {"save_config_touch_enable_with_new_calibration", enabling_touch_applies_new_calibration_together},
+  {"save_config_disables_touch_immediately", touch_disable_applies_immediately},
+  {"save_config_enables_touch_immediately", touch_enable_applies_immediately},
+  {"save_config_applies_touch_calibration", calibration_applies_immediately},
   {"save_config_reports_nvs_failure", storage_failure_returns_error},
   {"factory_reset_failure_does_not_reboot", failed_reset_does_not_schedule_reboot},
   {"save_config_role_change_requests_reboot", role_change_requests_reboot},

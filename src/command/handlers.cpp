@@ -433,6 +433,7 @@ void cmdSaveConfig(JsonDocument& request, Stream& output) {
     }
 
     Settings new_settings = settings.getAll();
+    touch.applySettings(new_settings.touch);
     bool reboot_needed =
         prev_settings.device.name != new_settings.device.name ||
         prev_settings.device.number != new_settings.device.number ||
