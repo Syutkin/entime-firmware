@@ -126,6 +126,7 @@ public:
 
   /**
    * @brief Сохранить все настройки в NVS
+   * При ошибке часть ключей уже может быть записана; повторный save допишет остальные.
    * @return количество сохраненных ключей при успехе, -1 при ошибке
    */
   int save();
@@ -211,15 +212,15 @@ private:
   Settings settings_;
   bool initialized_ = false;
 
-  // Хелперы для записи только при изменении (уменьшение износа NVS + единый формат логирования)
-  bool putStringIfChanged_(const char *key, const String &v,
-                           const char *def, bool secret = false);
-  bool putBoolIfChanged_(const char *key, bool v, bool def);
-  bool putUCharIfChanged_(const char *key, uint8_t v, uint8_t def);
-  bool putShortIfChanged_(const char *key, int16_t v, int16_t def);
-  bool putUShortIfChanged_(const char *key, uint16_t v, uint16_t def);
-  bool putFloatIfChanged_(const char *key, float v, float def,
-                          float eps = 0.0001f);
+  // Запись при изменении: 0 — без изменений, 1 — записано, -1 — ошибка.
+  int putStringIfChanged_(const char *key, const String &v, const char *def,
+                          bool secret = false);
+  int putBoolIfChanged_(const char *key, bool v, bool def);
+  int putUCharIfChanged_(const char *key, uint8_t v, uint8_t def);
+  int putShortIfChanged_(const char *key, int16_t v, int16_t def);
+  int putUShortIfChanged_(const char *key, uint16_t v, uint16_t def);
+  int putFloatIfChanged_(const char *key, float v, float def,
+                         float eps = 0.0001f);
 
   // Валидация
   bool validateDevice(const DeviceSettings &device) const;
@@ -234,11 +235,11 @@ private:
   bool isValidNtpHost(const String &host, bool allowEmpty) const;
 
   // Сохранение/загрузка отдельных групп
-  size_t saveDevice();
-  size_t saveSync();
-  size_t saveWifi();
-  size_t saveGps();
-  size_t saveTouch();
+  int saveDevice();
+  int saveSync();
+  int saveWifi();
+  int saveGps();
+  int saveTouch();
   void loadDevice();
   void loadSync();
   void loadWifi();

@@ -58,12 +58,14 @@ void unavailable_storage_stops_before_apply() {
   expect(result.status==TouchCalibrationFlowStatus::SaveFailed && display.tft().applied_calls==applied,
          "unavailable NVS must stop flow before applying new calibration");
 }
-void failed_write_stops_before_apply() {
+template <bool Interactive> void failed_write_stops_before_apply() {
   setup(); host_project::write_fails=true; const auto applied=display.tft().applied_calls;
-  auto result=runTouchCalibrationFlow(true);
+  const auto previous = settings.toJson();
+  auto result=runTouchCalibrationFlow(Interactive);
   require(host_project::failed_writes>0,"NVS write fault must actually occur");
   expect(result.status==TouchCalibrationFlowStatus::SaveFailed && display.tft().applied_calls==applied,
          "NVS failure must not be reported as calibrated/saved success");
+  expect(settings.toJson() == previous, "failed calibration save must restore prior RAM settings");
 }
 const Test kTests[] = {
   {"touch_flow_not_ready",unavailable_touch_stops_before_wizard},
@@ -71,7 +73,8 @@ const Test kTests[] = {
   {"touch_flow_interactive_save_apply_reboot",calibration_save_apply_roundtrip<true>},
   {"touch_flow_noninteractive_save_apply_reboot",calibration_save_apply_roundtrip<false>},
   {"touch_flow_storage_unavailable",unavailable_storage_stops_before_apply},
-  {"touch_flow_storage_write_failure",failed_write_stops_before_apply,"AU004"},
+  {"touch_flow_storage_write_failure",failed_write_stops_before_apply<true>},
+  {"touch_flow_noninteractive_storage_write_failure",failed_write_stops_before_apply<false>},
 };
 }
 int main(int argc,char **argv) { return run_tests(argc,argv,kTests); }

@@ -81,7 +81,7 @@ void storage_failure_returns_error() {
   auto response = save(R"({"data":{"device":{"number":2}}})");
   require(host_project::failed_writes > 0, "NVS failure must actually occur in save_config");
   expect(response["status"] == "error" && response["error_code"] == 202,
-         "AU004: save_config must report storage failure to the client");
+         "save_config must report storage failure to the client");
 }
 
 void failed_reset_does_not_schedule_reboot() {
@@ -93,7 +93,7 @@ void failed_reset_does_not_schedule_reboot() {
   require(!deserializeJson(response, output.output), "reset must respond with JSON");
   require(host_project::failed_clears > 0, "NVS clear failure must actually occur");
   expect(response["status"] == "error" && reset_timers == 0,
-         "AU004: failed reset must report error without scheduling reboot");
+         "failed reset must report error without scheduling reboot");
 }
 
 void role_change_requests_reboot() {
@@ -113,8 +113,8 @@ const Test kTests[] = {
   {"save_config_disables_touch_immediately", touch_disable_applies_immediately, "AU006"},
   {"save_config_enables_touch_immediately", touch_enable_applies_immediately, "AU006"},
   {"save_config_applies_touch_calibration", calibration_applies_immediately, "AU006"},
-  {"save_config_reports_nvs_failure", storage_failure_returns_error, "AU004"},
-  {"factory_reset_failure_does_not_reboot", failed_reset_does_not_schedule_reboot, "AU004"},
+  {"save_config_reports_nvs_failure", storage_failure_returns_error},
+  {"factory_reset_failure_does_not_reboot", failed_reset_does_not_schedule_reboot},
   {"save_config_role_change_requests_reboot", role_change_requests_reboot},
   {"touch_enabled_press_control", enabled_touch_generates_press},
 };

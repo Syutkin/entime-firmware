@@ -4,8 +4,10 @@
 #include <ArduinoJson.h>
 #include <cctype>
 #include <cmath>
+#include <initializer_list>
 
 static const char *TAG = "Settings";
+static constexpr const char *kSettingsNamespace = "entime";
 
 // ============================================================================
 // NVS change logging (единый формат)
@@ -185,173 +187,189 @@ void SettingsManager::setDefaults() {
 // Write-if-changed helpers (уменьшают износ NVS + debug лог)
 // ============================================================================
 
-bool SettingsManager::putStringIfChanged_(const char *key, const String &v,
-                                          const char *def, bool secret) {
+int SettingsManager::putStringIfChanged_(const char *key, const String &v,
+                                         const char *def, bool secret) {
   String cur = prefs_.getString(key, def);
   if (cur == v) {
     SETTINGS_LOG_NVS_SKIP(key);
-    return false;
+    return 0;
   }
 
-  prefs_.putString(key, v);
+  // Preferences::putString не различает ошибку и успешную запись пустой строки.
+  nvs_handle_t handle;
+  esp_err_t err = nvs_open(kSettingsNamespace, NVS_READWRITE, &handle);
+  if (err == ESP_OK) {
+    err = nvs_set_str(handle, key, v.c_str());
+    if (err == ESP_OK)
+      err = nvs_commit(handle);
+    nvs_close(handle);
+  }
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to save NVS key '%s': %s", key, esp_err_to_name(err));
+    return -1;
+  }
 
   if (secret) {
     SETTINGS_LOG_NVS_SECRET(key);
   } else {
     SETTINGS_LOG_NVS_FMT(key, "\"%s\"", v.c_str());
   }
-  return true;
+  return 1;
 }
 
-bool SettingsManager::putBoolIfChanged_(const char *key, bool v, bool def) {
+int SettingsManager::putBoolIfChanged_(const char *key, bool v, bool def) {
   bool cur = prefs_.getBool(key, def);
   if (cur == v) {
     SETTINGS_LOG_NVS_SKIP(key);
-    return false;
+    return 0;
   }
 
-  prefs_.putBool(key, v);
+  if (prefs_.putBool(key, v) != sizeof(uint8_t)) {
+    ESP_LOGE(TAG, "Failed to save NVS key '%s'", key);
+    return -1;
+  }
   SETTINGS_LOG_NVS_FMT(key, "%s", v ? "true" : "false");
-  return true;
+  return 1;
 }
 
-bool SettingsManager::putUCharIfChanged_(const char *key, uint8_t v,
-                                         uint8_t def) {
+int SettingsManager::putUCharIfChanged_(const char *key, uint8_t v,
+                                        uint8_t def) {
   uint8_t cur = prefs_.getUChar(key, def);
   if (cur == v) {
     SETTINGS_LOG_NVS_SKIP(key);
-    return false;
+    return 0;
   }
 
-  prefs_.putUChar(key, v);
+  if (prefs_.putUChar(key, v) != sizeof(uint8_t)) {
+    ESP_LOGE(TAG, "Failed to save NVS key '%s'", key);
+    return -1;
+  }
   SETTINGS_LOG_NVS_FMT(key, "%u", v);
-  return true;
+  return 1;
 }
 
-bool SettingsManager::putShortIfChanged_(const char *key, int16_t v,
-                                         int16_t def) {
+int SettingsManager::putShortIfChanged_(const char *key, int16_t v,
+                                        int16_t def) {
   int16_t cur = prefs_.getShort(key, def);
   if (cur == v) {
     SETTINGS_LOG_NVS_SKIP(key);
-    return false;
+    return 0;
   }
 
-  prefs_.putShort(key, v);
+  if (prefs_.putShort(key, v) != sizeof(int16_t)) {
+    ESP_LOGE(TAG, "Failed to save NVS key '%s'", key);
+    return -1;
+  }
   SETTINGS_LOG_NVS_FMT(key, "%d", v);
-  return true;
+  return 1;
 }
 
-bool SettingsManager::putUShortIfChanged_(const char *key, uint16_t v,
-                                          uint16_t def) {
+int SettingsManager::putUShortIfChanged_(const char *key, uint16_t v,
+                                         uint16_t def) {
   uint16_t cur = prefs_.getUShort(key, def);
   if (cur == v) {
     SETTINGS_LOG_NVS_SKIP(key);
-    return false;
+    return 0;
   }
 
-  prefs_.putUShort(key, v);
+  if (prefs_.putUShort(key, v) != sizeof(uint16_t)) {
+    ESP_LOGE(TAG, "Failed to save NVS key '%s'", key);
+    return -1;
+  }
   SETTINGS_LOG_NVS_FMT(key, "%u", (unsigned)v);
-  return true;
+  return 1;
 }
 
-bool SettingsManager::putFloatIfChanged_(const char *key, float v, float def,
-                                         float eps) {
+int SettingsManager::putFloatIfChanged_(const char *key, float v, float def,
+                                        float eps) {
   float cur = prefs_.getFloat(key, def);
   if (std::fabs(cur - v) <= eps) {
     SETTINGS_LOG_NVS_SKIP(key);
-    return false;
+    return 0;
   }
 
-  prefs_.putFloat(key, v);
+  if (prefs_.putFloat(key, v) != sizeof(float)) {
+    ESP_LOGE(TAG, "Failed to save NVS key '%s'", key);
+    return -1;
+  }
   SETTINGS_LOG_NVS_FMT(key, "%.4f", v);
-  return true;
+  return 1;
 }
 
 // ============================================================================
 // Сохранение/загрузка отдельных групп
 // ============================================================================
 
-size_t SettingsManager::saveDevice() {
-  size_t count = 0;
-  if (putStringIfChanged_("device.name", settings_.device.name,
-                          DEFAULT_DEVICE_NAME))
-    count++;
-  if (putUCharIfChanged_("device.number", settings_.device.number,
-                         DEFAULT_DEVICE_NUMBER))
-    count++;
-  if (putUCharIfChanged_("device.type", settings_.device.type,
-                         DEFAULT_DEVICE_TYPE))
-    count++;
-  if (putShortIfChanged_("device.tz_min",
-                         settings_.device.timezone_offset_min,
-                         DEFAULT_DEVICE_TIMEZONE_OFFSET_MIN))
-    count++;
+static int countSavedKeys(std::initializer_list<int> results) {
+  int count = 0;
+  for (int result : results) {
+    if (result < 0)
+      return -1;
+    count += result;
+  }
   return count;
 }
 
-size_t SettingsManager::saveSync() {
-  size_t count = 0;
-  if (putBoolIfChanged_("sync.auto", settings_.sync.auto_sync,
-                        DEFAULT_SYNC_AUTO))
-    count++;
-  if (putUCharIfChanged_("sync.source", settings_.sync.source,
-                         DEFAULT_SYNC_SOURCE))
-    count++;
-  if (putStringIfChanged_("sync.ntp1", settings_.sync.ntp1, DEFAULT_SYNC_NTP1))
-    count++;
-  if (putStringIfChanged_("sync.ntp2", settings_.sync.ntp2, DEFAULT_SYNC_NTP2))
-    count++;
-  if (putStringIfChanged_("sync.ntp3", settings_.sync.ntp3, DEFAULT_SYNC_NTP3))
-    count++;
-  return count;
+int SettingsManager::saveDevice() {
+  return countSavedKeys({
+      putStringIfChanged_("device.name", settings_.device.name,
+                          DEFAULT_DEVICE_NAME),
+      putUCharIfChanged_("device.number", settings_.device.number,
+                         DEFAULT_DEVICE_NUMBER),
+      putUCharIfChanged_("device.type", settings_.device.type,
+                         DEFAULT_DEVICE_TYPE),
+      putShortIfChanged_("device.tz_min", settings_.device.timezone_offset_min,
+                         DEFAULT_DEVICE_TIMEZONE_OFFSET_MIN),
+  });
 }
 
-size_t SettingsManager::saveWifi() {
-  size_t count = 0;
-  if (putBoolIfChanged_("wifi.active", settings_.wifi.active,
-                        DEFAULT_WIFI_ACTIVE))
-    count++;
-  if (putStringIfChanged_("wifi.ssid", settings_.wifi.ssid, DEFAULT_WIFI_SSID))
-    count++;
-  // пароль не логируем значением
-  if (putStringIfChanged_("wifi.passwd", settings_.wifi.passwd,
-                          DEFAULT_WIFI_PASSWD, true))
-    count++;
-  return count;
+int SettingsManager::saveSync() {
+  return countSavedKeys({
+      putBoolIfChanged_("sync.auto", settings_.sync.auto_sync,
+                        DEFAULT_SYNC_AUTO),
+      putUCharIfChanged_("sync.source", settings_.sync.source,
+                         DEFAULT_SYNC_SOURCE),
+      putStringIfChanged_("sync.ntp1", settings_.sync.ntp1, DEFAULT_SYNC_NTP1),
+      putStringIfChanged_("sync.ntp2", settings_.sync.ntp2, DEFAULT_SYNC_NTP2),
+      putStringIfChanged_("sync.ntp3", settings_.sync.ntp3, DEFAULT_SYNC_NTP3),
+  });
 }
 
-size_t SettingsManager::saveGps() {
-  size_t count = 0;
-  if (putBoolIfChanged_("gps.enabled", settings_.gps.enabled,
-                        DEFAULT_GPS_ENABLED))
-    count++;
-  return count;
+int SettingsManager::saveWifi() {
+  return countSavedKeys({
+      putBoolIfChanged_("wifi.active", settings_.wifi.active,
+                        DEFAULT_WIFI_ACTIVE),
+      putStringIfChanged_("wifi.ssid", settings_.wifi.ssid, DEFAULT_WIFI_SSID),
+      // пароль не логируем значением
+      putStringIfChanged_("wifi.passwd", settings_.wifi.passwd,
+                          DEFAULT_WIFI_PASSWD, true),
+  });
 }
 
-size_t SettingsManager::saveTouch() {
-  size_t count = 0;
-  if (putBoolIfChanged_("touch.enabled", settings_.touch.enabled,
-                        DEFAULT_TOUCH_ENABLED))
-    count++;
-  if (putBoolIfChanged_("touch.cal_valid", settings_.touch.calibration.valid,
-                        DEFAULT_TOUCH_CAL_VALID))
-    count++;
-  if (putUShortIfChanged_("touch.cal0", settings_.touch.calibration.data[0],
-                          DEFAULT_TOUCH_CAL0))
-    count++;
-  if (putUShortIfChanged_("touch.cal1", settings_.touch.calibration.data[1],
-                          DEFAULT_TOUCH_CAL1))
-    count++;
-  if (putUShortIfChanged_("touch.cal2", settings_.touch.calibration.data[2],
-                          DEFAULT_TOUCH_CAL2))
-    count++;
-  if (putUShortIfChanged_("touch.cal3", settings_.touch.calibration.data[3],
-                          DEFAULT_TOUCH_CAL3))
-    count++;
-  if (putUShortIfChanged_("touch.cal4", settings_.touch.calibration.data[4],
-                          DEFAULT_TOUCH_CAL4))
-    count++;
-  return count;
+int SettingsManager::saveGps() {
+  return countSavedKeys({
+      putBoolIfChanged_("gps.enabled", settings_.gps.enabled,
+                        DEFAULT_GPS_ENABLED),
+  });
+}
+
+int SettingsManager::saveTouch() {
+  return countSavedKeys({
+      putBoolIfChanged_("touch.enabled", settings_.touch.enabled,
+                        DEFAULT_TOUCH_ENABLED),
+      putBoolIfChanged_("touch.cal_valid", settings_.touch.calibration.valid,
+                        DEFAULT_TOUCH_CAL_VALID),
+      putUShortIfChanged_("touch.cal0", settings_.touch.calibration.data[0],
+                          DEFAULT_TOUCH_CAL0),
+      putUShortIfChanged_("touch.cal1", settings_.touch.calibration.data[1],
+                          DEFAULT_TOUCH_CAL1),
+      putUShortIfChanged_("touch.cal2", settings_.touch.calibration.data[2],
+                          DEFAULT_TOUCH_CAL2),
+      putUShortIfChanged_("touch.cal3", settings_.touch.calibration.data[3],
+                          DEFAULT_TOUCH_CAL3),
+      putUShortIfChanged_("touch.cal4", settings_.touch.calibration.data[4],
+                          DEFAULT_TOUCH_CAL4),
+  });
 }
 
 void SettingsManager::loadDevice() {
@@ -414,7 +432,7 @@ bool SettingsManager::begin() {
     return true;
   }
 
-  if (!prefs_.begin("entime", false)) {
+  if (!prefs_.begin(kSettingsNamespace, false)) {
     ESP_LOGE(TAG, "Failed to open NVS namespace 'entime'");
     return false;
   }
@@ -470,15 +488,15 @@ int SettingsManager::save() {
     return -1;
   }
 
-  size_t total = 0;
-  total += saveDevice();
-  total += saveSync();
-  total += saveWifi();
-  total += saveGps();
-  total += saveTouch();
+  const int total = countSavedKeys({saveDevice(), saveSync(), saveWifi(),
+                                    saveGps(), saveTouch()});
+  if (total < 0) {
+    ESP_LOGE(TAG, "Failed to save settings");
+    return -1;
+  }
 
-  ESP_LOGI(TAG, "Settings saved successfully (%zu keys)", total);
-  return (int)total;
+  ESP_LOGI(TAG, "Settings saved successfully (%d keys)", total);
+  return total;
 }
 
 bool SettingsManager::factoryReset() {
@@ -487,7 +505,10 @@ bool SettingsManager::factoryReset() {
     return false;
   }
 
-  prefs_.clear();
+  if (!prefs_.clear()) {
+    ESP_LOGE(TAG, "Failed to clear settings");
+    return false;
+  }
   setDefaults();
 
   if (save() < 0) {

@@ -48,7 +48,8 @@ TouchCalibrationFlowResult runTouchCalibrationFlow(bool interactiveUi) {
     return result;
   }
 
-  TouchSettings touchSettings = settings.getTouch();
+  const TouchSettings previousSettings = settings.getTouch();
+  TouchSettings touchSettings = previousSettings;
   touchSettings.calibration = calibration;
   if (!settings.setTouch(touchSettings)) {
     result.status = TouchCalibrationFlowStatus::InvalidSettings;
@@ -57,6 +58,7 @@ TouchCalibrationFlowResult runTouchCalibrationFlow(bool interactiveUi) {
 
   int savedKeys = settings.save();
   if (savedKeys < 0) {
+    settings.setTouch(previousSettings);
     result.status = TouchCalibrationFlowStatus::SaveFailed;
     return result;
   }

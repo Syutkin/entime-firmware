@@ -147,16 +147,67 @@ template <unsigned Type> void write_failure_is_reported() {
   const int result = manager.save();
   require(host_project::failed_writes > 0, "the selected NVS write must actually fail");
   expect(result < 0,
-         "AU004: a failed NVS write must propagate as save failure");
+         "a failed NVS write must propagate as save failure");
+}
+
+void empty_strings_are_saved_and_reloaded() {
+  SettingsManager manager; start(manager);
+  auto wifi = manager.getWifi(); wifi.ssid = "Network"; wifi.passwd = "Secret";
+  require(manager.setWifi(wifi) && manager.save() == 2, "seed two strings");
+  wifi.ssid = ""; wifi.passwd = "";
+  auto sync = manager.getSync(); sync.ntp2 = "";
+  require(manager.setWifi(wifi) && manager.setSync(sync), "empty optional strings must validate");
+  expect(manager.save() == 3, "clearing strings must count as successful writes");
+  SettingsManager reboot; start(reboot);
+  expect(reboot.getWifi().ssid.empty() && reboot.getWifi().passwd.empty() &&
+             reboot.getSync().ntp2.empty() && reboot.save() == 0,
+         "empty strings must survive reboot, including nonempty NTP defaults");
+  expect(host_project::open_handles == 0, "all NVS handles must be closed");
+}
+
+template <bool Empty, unsigned Failure> void string_storage_failure_is_reported() {
+  SettingsManager manager; start(manager);
+  auto sync = manager.getSync(); sync.ntp2 = Empty ? "" : "new.example.com";
+  require(manager.setSync(sync), "optional NTP host must validate");
+  const auto before = host_project::nvs;
+  if constexpr (Failure == 0) host_project::nvs_open_fails = true;
+  else if constexpr (Failure == 1) host_project::failing_key = "sync.ntp2";
+  else host_project::nvs_commit_fails = true;
+  expect(manager.save() < 0, "string open/write/commit failure must propagate");
+  require(host_project::failed_opens + host_project::failed_writes +
+              host_project::failed_commits > 0, "selected storage fault must be reached");
+  expect(host_project::nvs == before && host_project::open_handles == 0,
+         "failed string operation must close its handle and preserve stored settings");
+}
+
+void partial_save_can_be_retried() {
+  SettingsManager manager; start(manager);
+  auto device = manager.getDevice(); device.number = 17;
+  auto wifi = manager.getWifi(); wifi.ssid = "RaceNetwork";
+  require(manager.setDevice(device) && manager.setWifi(wifi), "changes must validate");
+  host_project::failing_key = "wifi.ssid";
+  expect(manager.save() < 0, "one failed key must fail the save despite other successful writes");
+  require(std::get<uint8_t>(host_project::nvs.at("device.number")) == 17,
+          "test must exercise partial persistence");
+  host_project::failing_key.clear();
+  expect(manager.save() == 1 && manager.save() == 0,
+         "retry must save only the previously failed key");
+  SettingsManager reboot; start(reboot);
+  expect(reboot.getDevice().number == 17 && reboot.getWifi().ssid == "RaceNetwork",
+         "retry must preserve all intended changes after reboot");
 }
 
 void failed_clear_is_reported() {
   SettingsManager manager; start(manager, true);
   require(manager.save() > 0, "seed a saved configuration");
+  const auto before = manager.toJson();
+  const auto stored = host_project::nvs;
   host_project::clear_fails = true;
   const bool result = manager.factoryReset();
   require(host_project::failed_clears > 0, "NVS clear fault must actually be reached");
-  expect(!result, "AU004: failed NVS clear must fail factory reset");
+  expect(!result, "failed NVS clear must fail factory reset");
+  expect(manager.toJson() == before && host_project::nvs == stored,
+         "failed reset must preserve RAM settings and stored configuration");
 }
 
 void factory_reset_clears_saved_values() {
@@ -169,6 +220,14 @@ void factory_reset_clears_saved_values() {
 }
 
 const Test kTests[] = {
+  {"nvs_empty_strings_roundtrip", empty_strings_are_saved_and_reloaded},
+  {"nvs_empty_string_open_failure", string_storage_failure_is_reported<true,0>},
+  {"nvs_empty_string_write_failure", string_storage_failure_is_reported<true,1>},
+  {"nvs_empty_string_commit_failure", string_storage_failure_is_reported<true,2>},
+  {"nvs_nonempty_string_open_failure", string_storage_failure_is_reported<false,0>},
+  {"nvs_nonempty_string_write_failure", string_storage_failure_is_reported<false,1>},
+  {"nvs_nonempty_string_commit_failure", string_storage_failure_is_reported<false,2>},
+  {"nvs_partial_save_retry", partial_save_can_be_retried},
   {"default_name_persists_gps_disable", other_default_name_settings_survive_reboot<0>},
   {"default_name_persists_timezone", other_default_name_settings_survive_reboot<1>},
   {"default_name_persists_wifi_password", other_default_name_settings_survive_reboot<2>},
@@ -179,12 +238,12 @@ const Test kTests[] = {
   {"default_name_persists_touch_calibration", default_name_preserves_settings<2>},
   {"default_name_persists_sync_policy", default_name_preserves_settings<3>},
   {"settings_custom_name_roundtrip", custom_name_roundtrip},
-  {"nvs_string_write_failure", write_failure_is_reported<0>, "AU004"},
-  {"nvs_bool_write_failure", write_failure_is_reported<1>, "AU004"},
-  {"nvs_uint8_write_failure", write_failure_is_reported<2>, "AU004"},
-  {"nvs_int16_write_failure", write_failure_is_reported<3>, "AU004"},
-  {"nvs_uint16_write_failure", write_failure_is_reported<4>, "AU004"},
-  {"nvs_factory_reset_clear_failure", failed_clear_is_reported, "AU004"},
+  {"nvs_string_write_failure", write_failure_is_reported<0>},
+  {"nvs_bool_write_failure", write_failure_is_reported<1>},
+  {"nvs_uint8_write_failure", write_failure_is_reported<2>},
+  {"nvs_int16_write_failure", write_failure_is_reported<3>},
+  {"nvs_uint16_write_failure", write_failure_is_reported<4>},
+  {"nvs_factory_reset_clear_failure", failed_clear_is_reported},
   {"nvs_factory_reset_roundtrip", factory_reset_clears_saved_values},
 };
 } // namespace
