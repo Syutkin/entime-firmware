@@ -287,12 +287,15 @@ static int64_t apply_known_sqw_utc_offset(int64_t sqw_utc_est_us) {
   return pps_second_us + s_rtc_sqw_utc_offset_us;
 }
 
-static bool system_time_at_esp_time_us(int64_t esp_us, int64_t now_us, int64_t &utc_us_out) {
+static bool system_time_at_esp_time_us(int64_t esp_us, int64_t &utc_us_out) {
   if (!is_auto_sync_enabled())
     return false;
 
   timeval tv{};
   gettimeofday(&tv, nullptr);
+  // UTC и esp_timer должны относиться к одному моменту. Timestamp вызывающего
+  // кода мог быть снят до блокирующего чтения RTC по I2C.
+  const int64_t now_us = esp_timer_get_time();
   if (tv.tv_sec < (time_t)kMinValidUnixSec)
     return false;
 
@@ -906,7 +909,7 @@ void time_sync_update() {
             const uint32_t seconds = sqw_count - s_rtc_anchor_sqw_count;
             rtc_utc_us = s_status.anchor_utc_us + (int64_t)seconds * 1000000LL;
             anchor_source = "sqw";
-          } else if (system_time_at_esp_time_us(sqw_edge_us, now_us, rtc_utc_us)) {
+          } else if (system_time_at_esp_time_us(sqw_edge_us, rtc_utc_us)) {
             rtc_utc_us = apply_known_sqw_utc_offset(rtc_utc_us);
             anchor_source = s_have_rtc_sqw_utc_offset ? "system+sqw_offset" : "system";
           } else {
@@ -926,6 +929,16 @@ void time_sync_update() {
               if (diff > 500000 && diff < 1500000)            rtc_utc_us -= 1000000LL;
               else if (diff < -500000 && diff > -1500000)     rtc_utc_us += 1000000LL;
             }
+          }
+
+          // timeValid()/unixTime() могут занять миллисекунды. Возраст фронта
+          // для target UTC и окна допустимости считаем после всех I2C чтений.
+          now_us = esp_timer_get_time();
+          age_us = now_us - sqw_edge_us;
+          if (age_us < 0 || age_us > kSqwAgeWindowUs) {
+            set_fallback_status_from_anchor(allow_gps);
+            notify_state_change_if_needed();
+            return;
           }
 
           if (!have_rtc_anchor || s_rtc_anchor_sqw_count == 0) {
