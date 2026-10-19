@@ -2,8 +2,35 @@
 #include "command_router.h"
 #include "handlers.h"
 #include "esp_log.h"
+#include <cstring>
 
 static const char *TAG = "CommandParser";
+
+static void maskPasswords(JsonVariant value) {
+  if (value.is<JsonObject>()) {
+    for (JsonPair entry : value.as<JsonObject>()) {
+      if (std::strcmp(entry.key().c_str(), "passwd") == 0)
+        entry.value().set("***");
+      else
+        maskPasswords(entry.value());
+    }
+  } else if (value.is<JsonArray>()) {
+    for (JsonVariant entry : value.as<JsonArray>())
+      maskPasswords(entry);
+  }
+}
+
+static String jsonForLog(const JsonDocument &request) {
+  JsonDocument masked;
+  if (!masked.set(request))
+    return String("<payload omitted>");
+
+  // Меняем только копию: обработчик должен получить исходный пароль.
+  maskPasswords(masked.as<JsonVariant>());
+  String result;
+  serializeJson(masked, result);
+  return result;
+}
 
 CommandParser::CommandParser(Stream &stream, const char *sourceName,
                              size_t bufferSize)
@@ -99,9 +126,9 @@ void CommandParser::update() {
 
     // Если встретили символ новой строки - это конец команды
     if (c == '\n') {
-      // Логируем полученную команду для отладки
-      ESP_LOGD(TAG, "[%s] Received command (length: %u): %.*s", _sourceName,
-               (unsigned)_bufferPos, (int)_bufferPos, _buffer);
+      // Сырой кадр может содержать пароль даже при невалидном JSON.
+      ESP_LOGD(TAG, "[%s] Received command (length: %u)", _sourceName,
+               (unsigned)_bufferPos);
 
       // Пытаемся парсить JSON
       processJson();
@@ -146,16 +173,13 @@ void CommandParser::processJson() {
   if (error) {
     // Невалидный JSON - логируем ошибку
     ESP_LOGW(TAG, "[%s] Invalid JSON: %s", _sourceName, error.c_str());
-    ESP_LOGD(TAG, "[%s] JSON content: %.*s", _sourceName,
-             (int)(endPos - startPos), _buffer + startPos);
     JsonVariant nullId;
     sendError("", 101, "Invalid JSON", nullId, *_stream);
     return;
   }
 
-  // Успешный парсинг - логируем JSON
-  ESP_LOGI(TAG, "[%s] Received JSON: %.*s", _sourceName,
-           (int)(endPos - startPos), _buffer + startPos);
+  ESP_LOGI(TAG, "[%s] Received JSON: %s", _sourceName,
+           jsonForLog(doc).c_str());
   
   // Маршрутизация команды к обработчику
   CommandRouter::route(doc, *_stream);

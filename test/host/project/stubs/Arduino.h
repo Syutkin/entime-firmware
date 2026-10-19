@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../stubs/Arduino.h"
+#include "esp_log.h"
 #include <ArduinoJson.h>
 #include <cstddef>
 #include <cstring>
