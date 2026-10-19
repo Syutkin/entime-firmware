@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build host suites and run each case in a separate process (no dependencies)."""
+"""Build host suites using installed PlatformIO libraries and run each case separately."""
 
 import argparse
 from collections import Counter
@@ -61,6 +61,14 @@ def main() -> int:
     )
     parser.add_argument("--filter", default="", help="run names containing this text")
     parser.add_argument("--suite", default="", help="build suite paths containing this text")
+    parser.add_argument(
+        "--environment", default="rymcu-esp32-s3-devkitc-1",
+        help="PlatformIO environment supplying the installed libraries",
+    )
+    parser.add_argument(
+        "--libdeps-dir", type=Path,
+        help="override PlatformIO's libdeps directory (parent of environment folders)",
+    )
     args = parser.parse_args()
     test_dir = Path(__file__).resolve().parent
     repo_dir = test_dir.parent
@@ -70,6 +78,26 @@ def main() -> int:
     shared = host_dir / "support" / "application"
     compiler = shlex.split(os.environ.get("CXX", "g++"))
     counts: Counter = Counter()
+    libdeps_dir = (args.libdeps_dir or repo_dir / ".pio" / "libdeps").resolve()
+    library_dir = libdeps_dir / args.environment
+    arduino_json = library_dir / "ArduinoJson" / "src"
+    micro_nmea = library_dir / "MicroNMEA" / "src"
+    required_files = []
+    if any(source.parent.name != "timing" for source in suites):
+        required_files.append(arduino_json / "ArduinoJson.h")
+    if any(source.parent.name == "gps" for source in suites):
+        required_files += [micro_nmea / "MicroNMEA.h", micro_nmea / "MicroNMEA.cpp"]
+    missing = [path for path in required_files if not path.is_file()]
+    if missing:
+        parser.error(
+            "missing installed PlatformIO library files:\n"
+            + "\n".join(map(str, missing))
+            + "\nInstall the firmware dependencies first: "
+            + shlex.join(["pio", "pkg", "install", "--environment", args.environment,
+                          "--project-dir", str(repo_dir)])
+        )
+    if required_files:
+        print(f"LIBRARIES {library_dir}", flush=True)
 
     # Build products never enter the source tree or PlatformIO's build folder.
     with tempfile.TemporaryDirectory(prefix="entime-host-tests-") as build_dir:
@@ -89,7 +117,7 @@ def main() -> int:
                     command += [f"-I{host_dir / 'stubs' / 'drivers'}"]
                 command += [
                     f"-I{host_dir / 'stubs' / 'application'}",
-                    "-isystem", str(test_dir / "vendor" / "ArduinoJson" / "src"),
+                    "-isystem", str(arduino_json),
                     "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections",
                 ]
                 extra_sources += [repo_dir / "src" / name
@@ -98,8 +126,8 @@ def main() -> int:
                                   for name in SUPPORT_SOURCES.get(suite_path, ())]
                 extra_sources.append(shared / "clock.cpp")
                 if group == "gps":
-                    command += ["-isystem", str(test_dir / "vendor" / "MicroNMEA" / "src")]
-                    extra_sources.append(test_dir / "vendor/MicroNMEA/src/MicroNMEA.cpp")
+                    command += ["-isystem", str(micro_nmea)]
+                    extra_sources.append(micro_nmea / "MicroNMEA.cpp")
             command += [
                 f"-I{host_dir / 'stubs' / 'base'}", f"-I{repo_dir / 'src'}",
             ]

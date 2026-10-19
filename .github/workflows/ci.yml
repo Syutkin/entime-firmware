@@ -9,26 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  host-tests:
-    name: Host tests (UBSan)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      - name: Run host tests
-        env:
-          CXX: g++
-        run: python3 test/run_host_tests.py --sanitize --strict
-
   firmware:
-    name: ESP32-S3 firmware
+    name: Host tests (UBSan) and ESP32-S3 firmware
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -56,7 +38,15 @@ jobs:
         run: python3 -m pip install --upgrade platformio
 
       - name: Update PlatformIO dependencies
+        id: dependencies
         run: pio pkg update --environment rymcu-esp32-s3-devkitc-1 --no-save
 
+      - name: Run host tests
+        env:
+          CXX: g++
+        run: python3 test/run_host_tests.py --environment rymcu-esp32-s3-devkitc-1 --sanitize --strict
+
       - name: Build firmware
+        # Known test failures must not hide compiler errors in the firmware.
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: pio run --environment rymcu-esp32-s3-devkitc-1
