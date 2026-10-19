@@ -33,17 +33,79 @@ template <unsigned Group> void default_name_preserves_settings() {
   start(reboot);
   if constexpr (Group == 0)
     expect(reboot.getWifi().active && reboot.getWifi().ssid == "RaceNetwork",
-           "AU001: saved WiFi must survive reboot with factory device name");
+           "saved WiFi must survive reboot with factory device name");
   else if constexpr (Group == 1)
     expect(reboot.getDevice().type == 2 && reboot.getDevice().number == 17,
-           "AU001: saved role/number must survive reboot with factory name");
+           "saved role/number must survive reboot with factory name");
   else if constexpr (Group == 2)
     expect(reboot.getTouch().calibration.valid &&
                reboot.getTouch().calibration.data[0] == 123,
-           "AU001: saved touch calibration must survive reboot");
+           "saved touch calibration must survive reboot");
   else
     expect(reboot.getSync().source == 2 && !reboot.getSync().auto_sync,
-           "AU001: saved sync policy must survive reboot with factory name");
+           "saved sync policy must survive reboot with factory name");
+}
+
+template <unsigned Group> void other_default_name_settings_survive_reboot() {
+  SettingsManager first; start(first);
+  if constexpr (Group == 0) {
+    auto gps = first.getGps(); gps.enabled = false;
+    require(first.setGps(gps), "GPS disable must validate");
+  } else if constexpr (Group == 1) {
+    auto device = first.getDevice(); device.timezone_offset_min = -210;
+    require(first.setDevice(device), "timezone must validate");
+  } else {
+    auto wifi = first.getWifi(); wifi.passwd = "RacePassword";
+    require(first.setWifi(wifi), "WiFi password must validate");
+  }
+  require(first.save() > 0, "changed setting must be saved");
+  require(host_project::nvs.count("device.name") == 0,
+          "unchanged default name must not require a storage marker");
+  const auto writes = host_project::successful_writes;
+  SettingsManager reboot; start(reboot);
+  if constexpr (Group == 0)
+    expect(!reboot.getGps().enabled, "saved GPS disable must survive reboot");
+  else if constexpr (Group == 1)
+    expect(reboot.getDevice().timezone_offset_min == -210,
+           "saved timezone must survive reboot");
+  else
+    expect(reboot.getWifi().passwd == "RacePassword",
+           "saved password must survive reboot");
+  expect(reboot.save() == 0 && host_project::successful_writes == writes,
+         "loading and saving unchanged settings must not rewrite NVS");
+}
+
+void sparse_legacy_storage_without_device_name() {
+  // Storage produced by earlier firmware: only non-default keys, no name marker.
+  host_project::nvs["wifi.ssid"] = std::string("LegacyNetwork");
+  host_project::nvs["device.number"] = uint8_t{255};
+  host_project::nvs["touch.cal4"] = uint16_t{1234};
+  SettingsManager manager; start(manager);
+  expect(manager.getWifi().ssid == "LegacyNetwork" &&
+             manager.getDevice().number == 255 &&
+             manager.getTouch().calibration.data[4] == 1234,
+         "legacy sparse settings must load without migration or name marker");
+  expect(manager.getDevice().name == DEFAULT_DEVICE_NAME &&
+             manager.getDevice().type == DEFAULT_DEVICE_TYPE &&
+             manager.getSync().auto_sync == DEFAULT_SYNC_AUTO &&
+             manager.getGps().enabled == DEFAULT_GPS_ENABLED &&
+             manager.getTouch().calibration.data[0] == DEFAULT_TOUCH_CAL0,
+         "missing keys must independently use their defaults");
+  expect(host_project::successful_writes == 0 && manager.save() == 0,
+         "reading legacy settings must not create or rewrite keys");
+}
+
+void empty_storage_uses_defaults_without_writes() {
+  SettingsManager manager; start(manager);
+  const auto snapshot = manager.toJson();
+  auto device = manager.getDevice(); device.name = "Temporary";
+  require(manager.setDevice(device), "temporary RAM setting must validate");
+  expect(manager.load(), "empty NVS reload must succeed");
+  expect(manager.toJson() == snapshot,
+         "empty storage must restore all defaults, including changed RAM values");
+  expect(manager.save() == 0 && host_project::nvs.empty() &&
+             host_project::successful_writes == 0,
+         "defaults must not require any NVS writes or sentinel key");
 }
 
 void custom_name_roundtrip() {
@@ -107,10 +169,15 @@ void factory_reset_clears_saved_values() {
 }
 
 const Test kTests[] = {
-  {"default_name_persists_wifi", default_name_preserves_settings<0>, "AU001"},
-  {"default_name_persists_device_role", default_name_preserves_settings<1>, "AU001"},
-  {"default_name_persists_touch_calibration", default_name_preserves_settings<2>, "AU001"},
-  {"default_name_persists_sync_policy", default_name_preserves_settings<3>, "AU001"},
+  {"default_name_persists_gps_disable", other_default_name_settings_survive_reboot<0>},
+  {"default_name_persists_timezone", other_default_name_settings_survive_reboot<1>},
+  {"default_name_persists_wifi_password", other_default_name_settings_survive_reboot<2>},
+  {"settings_sparse_legacy_storage_without_name", sparse_legacy_storage_without_device_name},
+  {"settings_empty_storage_defaults_without_writes", empty_storage_uses_defaults_without_writes},
+  {"default_name_persists_wifi", default_name_preserves_settings<0>},
+  {"default_name_persists_device_role", default_name_preserves_settings<1>},
+  {"default_name_persists_touch_calibration", default_name_preserves_settings<2>},
+  {"default_name_persists_sync_policy", default_name_preserves_settings<3>},
   {"settings_custom_name_roundtrip", custom_name_roundtrip},
   {"nvs_string_write_failure", write_failure_is_reported<0>, "AU004"},
   {"nvs_bool_write_failure", write_failure_is_reported<1>, "AU004"},

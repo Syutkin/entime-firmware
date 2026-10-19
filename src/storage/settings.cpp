@@ -437,13 +437,7 @@ bool SettingsManager::load() {
     return false;
   }
 
-  // Если ключ "device.name" не существует — настроек нет
-  if (!prefs_.isKey("device.name")) {
-    ESP_LOGI(TAG, "No saved settings found, using defaults");
-    setDefaults();
-    return true;
-  }
-
+  // Каждый ключ независим: значения по умолчанию могут не записываться в NVS.
   loadDevice();
   loadSync();
   loadWifi();
