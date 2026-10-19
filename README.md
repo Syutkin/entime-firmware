@@ -73,3 +73,13 @@ pio run -t upload
 ```bash
 pio device monitor
 ```
+
+## Тесты
+
+Host-тесты без платы ESP32:
+
+```bash
+python3 test/run_host_tests.py
+```
+
+Структура, запуск с UBSan и известные дефекты описаны в [test/README.md](test/README.md).
