@@ -13,6 +13,16 @@ import tempfile
 # Translation units linked with suites that do not include production sources
 # directly. Paths are relative to src/; shared support is configured separately.
 PRODUCTION_SOURCES = {
+    "ble/ble_lifecycle_test.cpp": ("hal/ble/ble.cpp",),
+    "ble/ble_services_test.cpp": (
+        "hal/ble/battery_service.cpp", "hal/ble/device_info_service.cpp",
+    ),
+    "ble/ble_stack_test.cpp": (
+        "hal/ble/ble.cpp", "hal/ble/nus_service.cpp",
+        "hal/ble/battery_service.cpp", "hal/ble/device_info_service.cpp",
+    ),
+    "touch/touch_action_test.cpp": ("app/touch_action_handler.cpp", "storage/settings.cpp"),
+    "ui/main_screen_test.cpp": ("ui/main_screen.cpp",),
     "wifi/wifi_manager_test.cpp": ("hal/wifi/wifi.cpp",),
     "events/second_events_test.cpp": (
         "timing/second_events.cpp", "timing/event_dispatcher.cpp",
@@ -66,6 +76,8 @@ GROUP_NAMES = {
     "touch": "Сенсорный экран",
     "battery": "Батарея",
     "wifi": "Wi-Fi",
+    "ble": "Управление BLE и сервисы",
+    "ui": "Координатор UI",
 }
 STATUSES = ("PASS", "XFAIL", "FAIL", "XPASS", "ERROR")
 

@@ -4,6 +4,7 @@
 #include <cstdint>
 #define TFT_MAGENTA 0xf81f
 #define TFT_BLACK 0
+class TFT_eSprite;
 class TFT_eSPI {
 public:
   bool pressed = false;

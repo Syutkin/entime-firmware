@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+enum class InaBatteryLevel : uint8_t { NoData, Critical, Empty, Low, Mid, Full };
 class Ina226Hal {
 public:
   bool ready = false, valid = false;
