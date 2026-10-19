@@ -101,6 +101,75 @@ template <bool Expiry> void bad_checksum_does_not_refresh_fix() {
   expect(Expiry ? gps.getState() == GPSState::SEARCHING : gps.lastFixUs() == 10000000,
          "bad checksum must not refresh the last valid fix or keep it ACTIVE");
 }
+std::string corrupt_checksum(std::string sentence) {
+  sentence[sentence.size()-4] = sentence[sentence.size()-4] == '0' ? '1' : '0';
+  return sentence;
+}
+void bad_sentence_preserves_all_trusted_timestamps() {
+  begin(); feed(rmc());
+  int64_t old_start = 0; require(gps.lastUtcUpdateSentenceStartUs(old_start), "UTC start must exist");
+  feed(corrupt_checksum(rmc("000001.00")),11000000);
+  int64_t last = 0, start = 0;
+  expect(gps.lastSentenceUs(last) && last == 10000000 && gps.lastFixUs() == 10000000 &&
+             utc_update() == 10000000 && gps.lastUtcUpdateSentenceStartUs(start) && start == old_start,
+         "bad checksum must preserve sentence, fix, UTC and sentence-start timestamps");
+  expect(gps.getState() == GPSState::ACTIVE && gps.nmeaFresh(),
+         "a rejected sentence must not immediately invalidate a still-fresh prior fix");
+}
+void repeated_bad_sentences_expire_and_valid_fix_recovers() {
+  gps.setStateCallback(state_changed);
+  begin(); feed(rmc());
+  const auto broken = corrupt_checksum(rmc("000001.00"));
+  for (unsigned second = 1; second <= 60; ++second) {
+    feed(broken,10000000 + second*1000000LL);
+    expect(gps.lastFixUs() == 10000000 &&
+               gps.getState() == (second <= 2 ? GPSState::ACTIVE : GPSState::SEARCHING),
+           "continuous checksum errors must not extend or repeatedly toggle a prior fix");
+  }
+  expect(!gps.nmeaFresh() && !gps.utcFresh(), "bad traffic must not keep NMEA or UTC fresh");
+  feed(rmc("000101.00"),71000000);
+  expect(gps.getState() == GPSState::ACTIVE && gps.lastFixUs() == 71000000 &&
+             utc_update() == 71000000 && gps.nmeaFresh() && gps.utcFresh(),
+         "fresh valid RMC must recover all timestamps after checksum errors");
+  expect(states == std::vector<GPSState>{GPSState::OFF,GPSState::SEARCHING,GPSState::ACTIVE,
+                                       GPSState::SEARCHING,GPSState::ACTIVE},
+         "callbacks must report only acquisition, expiry and recovery transitions");
+}
+template <unsigned Kind> void invalid_first_sentence_cannot_create_fix() {
+  begin(); auto broken = rmc();
+  if constexpr (Kind == 0) broken = corrupt_checksum(broken);
+  else if constexpr (Kind == 1) broken = broken.substr(0,broken.find('*')) + "\r\n";
+  else broken.replace(broken.size()-4,2,"ZZ");
+  feed(broken);
+  int64_t timestamp = 0;
+  expect(gps.getState() == GPSState::SEARCHING && gps.lastFixUs() == 0 &&
+             !gps.lastSentenceUs(timestamp) && !gps.lastUtcUpdateUs(timestamp) &&
+             !gps.nmeaFresh() && !gps.utcFresh(),
+         "bad, missing or nonhex checksum cannot create a first fix or trusted timestamp");
+}
+void bad_gga_does_not_refresh_fix_or_satellites() {
+  begin(); feed(rmc());
+  const auto gga = nmea("GPGGA,000001.00,4807.038,N,01131.000,E,1,07,0.9,545.4,M,46.9,M,,");
+  const auto old_sats = gps.nmea().getNumSatellites();
+  feed(corrupt_checksum(gga),13000000);
+  expect(gps.lastFixUs() == 10000000 && utc_update() == 10000000 &&
+             gps.getState() == GPSState::SEARCHING && gps.nmea().getNumSatellites() == old_sats,
+         "bad GGA must not refresh fix, UTC or satellite count");
+  feed(gga,14000000);
+  expect(gps.getState() == GPSState::ACTIVE && gps.lastFixUs() == 14000000 &&
+             gps.nmea().getNumSatellites() == 7,
+         "valid GGA must restore fix and satellite count");
+}
+void crlf_completion_only_updates_once() {
+  begin(); const auto sentence = rmc();
+  feed(sentence.substr(0,sentence.size()-1),10000000); // Ends in CR.
+  feed("\n",11000000);
+  int64_t last = 0;
+  expect(gps.lastSentenceUs(last) && last == 10000000 && gps.lastFixUs() == 10000000 &&
+             utc_update() == 10000000,
+         "the LF after a valid CR-terminated sentence must not refresh timestamps again");
+}
+
 void noise_then_valid_sentence_recovers() {
   begin(); feed(std::string(180,'x')+"\r\n"); feed(rmc("000001.00"),11000000);
   expect(gps.getState()==GPSState::ACTIVE && utc_update()==11000000,
@@ -142,6 +211,13 @@ void gsv_empty_snr() {
 }
 
 const Test kTests[] = {
+  {"gps_bad_checksum_preserves_all_timestamps",bad_sentence_preserves_all_trusted_timestamps},
+  {"gps_bad_checksum_stream_expires_then_recovers",repeated_bad_sentences_expire_and_valid_fix_recovers},
+  {"gps_first_sentence_bad_checksum",invalid_first_sentence_cannot_create_fix<0>},
+  {"gps_first_sentence_missing_checksum",invalid_first_sentence_cannot_create_fix<1>},
+  {"gps_first_sentence_nonhex_checksum",invalid_first_sentence_cannot_create_fix<2>},
+  {"gps_bad_gga_does_not_refresh_fix",bad_gga_does_not_refresh_fix_or_satellites},
+  {"gps_crlf_completion_updates_once",crlf_completion_only_updates_once},
   {"gps_disabled_no_uart",disabled_does_not_read_uart},
   {"gps_enable_after_disabled_idempotent",enable_after_disabled_and_begin_idempotence},
   {"gps_fragmented_sentence_timestamps",fragmented_timestamp},
@@ -156,8 +232,8 @@ const Test kTests[] = {
   {"gps_callbacks_on_changes",callbacks_only_on_changes},
   {"gps_callbacks_can_be_removed",unregister_callbacks},
   {"gps_pre2020_date_not_trusted",old_date_does_not_supply_utc},
-  {"gps_bad_checksum_keeps_last_valid_fix",bad_checksum_does_not_refresh_fix<false>,"AU011"},
-  {"gps_bad_checksum_cannot_extend_active_state",bad_checksum_does_not_refresh_fix<true>,"AU011"},
+  {"gps_bad_checksum_keeps_last_valid_fix",bad_checksum_does_not_refresh_fix<false>},
+  {"gps_bad_checksum_cannot_extend_active_state",bad_checksum_does_not_refresh_fix<true>},
   {"gps_noise_recovery",noise_then_valid_sentence_recovers},
   {"gps_gsv_talker_and_update",gsv_updates_and_separates_talkers},
   {"gps_gsv_fresh_at_deadline",gsv_freshness<15000000,true>},

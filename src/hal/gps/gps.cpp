@@ -115,7 +115,11 @@ void GPS::update() {
         }
         
         // Парсинг NMEA
-        const bool processed_sentence = _nmea.process(c);
+        const bool complete_sentence = _nmea.process(c);
+        // process() сообщает о конце строки даже при ошибочном checksum.
+        const char* sentence = _nmea.getSentence();
+        const bool processed_sentence = complete_sentence && sentence[0] == '$' &&
+                                        MicroNMEA::testChecksum(sentence);
         if (processed_sentence) {
             _last_sentence_us = now_us;
             if (_nmea.isValid()) {
