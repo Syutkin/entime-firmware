@@ -93,6 +93,9 @@ static uint32_t s_last_sqw_count = 0;
 static uint32_t s_rtc_anchor_sqw_count = 0; // sqw_count в момент set_anchor(RTC,...)
 static int64_t  s_last_sqw_edge_us = 0; // последний обработанный фронт SQW (для accuracy)
 static constexpr int64_t kSqwAgeWindowUs = 900000; // если обработали позже — лучше не переякориваться
+// Raw counter считает все GPIO фронты. Его приращение должно соответствовать
+// времени от RTC anchor, иначе лишний/пропущенный фронт станет UTC секундой.
+static constexpr int64_t kSqwCountToleranceUs = 200000;
 static bool s_in_rtc_fallback = false;
 static bool s_have_rtc_anchor = false;
 
@@ -735,6 +738,7 @@ void time_sync_update() {
     s_status.phase_aligned = false;
 
     if (!rtc.isReady()) {
+      s_rtc_anchor_sqw_count = 0;
       set_fallback_status_from_anchor(allow_gps);
       notify_state_change_if_needed();
       return;
@@ -761,6 +765,7 @@ void time_sync_update() {
 
     // 3a) RTC есть, но SQW edge еще не видим: продолжаем holdover, если он есть.
     if (!have_edge) {
+      s_rtc_anchor_sqw_count = 0;
       set_fallback_status_from_anchor(allow_gps);
 
       if (!s_logged_no_sqw) {
@@ -778,6 +783,9 @@ void time_sync_update() {
 
     // 3b) SQW signal есть, но lock еще набирается: не строим новый RTC anchor.
     if (!locked) {
+      // Anchor ещё пригоден для holdover, но raw counter через потерю lock
+      // переносить нельзя: в нём могли остаться лишние/пропущенные фронты.
+      s_rtc_anchor_sqw_count = 0;
       s_logged_no_sqw = false;
 
       if (!s_logged_sqw_warmup) {
@@ -838,6 +846,19 @@ void time_sync_update() {
         // правильную фазу UTC секунды.
         // -----------------------------------------------------------------------
         const bool have_rtc_anchor = have_rtc_time_anchor();
+
+        // Loop мог не увидеть ложный фронт и временную потерю lock. Поэтому
+        // проверяем и уже locked SQW, прежде чем считать UTC по raw counter.
+        if (have_rtc_anchor && s_rtc_anchor_sqw_count != 0) {
+          const uint32_t counted_seconds = sqw_count - s_rtc_anchor_sqw_count;
+          const int64_t counted_us = (int64_t)counted_seconds * 1000000LL;
+          const int64_t elapsed_us = sqw_edge_us - s_status.anchor_esp_us;
+          if (elapsed_us < 0 || llabs(counted_us - elapsed_us) > kSqwCountToleranceUs) {
+            ESP_LOGW(TAG, "RTC SQW count discontinuity: counted_us=%lld elapsed_us=%lld; rebuilding anchor",
+                     (long long)counted_us, (long long)elapsed_us);
+            s_rtc_anchor_sqw_count = 0;
+          }
+        }
 
         bool need_reanchor =
             !have_rtc_anchor ||

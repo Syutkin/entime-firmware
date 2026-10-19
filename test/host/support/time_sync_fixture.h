@@ -53,7 +53,7 @@ Signal pps_signal;
 Signal sqw_signal;
 bool sqw_edge_at_begin = false;
 
-int64_t event_utc_us(int64_t esp_us) {
+[[maybe_unused]] int64_t event_utc_us(int64_t esp_us) {
   int64_t utc_us = 0;
   require(time_sync_esp_to_utc_us(esp_us, utc_us), "missing event UTC anchor");
   return utc_us;
@@ -134,6 +134,21 @@ void reset() {
 
 int64_t esp_timer_get_time() { return host::clock.now_us; }
 void esp_rom_delay_us(unsigned us) { host::clock.now_us += us; }
+#ifdef HOST_REAL_RTC_SQW
+// Exercise the real driver alongside time_sync.cpp without merging the two
+// production files' private static variables into the same namespace.
+namespace host_sqw_driver {
+#include "../../../src/timing/rtc_sqw_isr.cpp"
+}
+void rtc_sqw_begin(int gpio, int edge_mode) {
+  (void)host_sqw_driver::TAG;
+  host_sqw_driver::rtc_sqw_begin(gpio, edge_mode);
+}
+bool rtc_sqw_get_raw(int64_t &timestamp, uint32_t &count) {
+  return host_sqw_driver::rtc_sqw_get_raw(timestamp, count);
+}
+bool rtc_sqw_is_locked() { return host_sqw_driver::rtc_sqw_is_locked(); }
+#else
 void rtc_sqw_begin(int, int) {
   sqw_signal =
       sqw_edge_at_begin ? Signal{host::clock.now_us, 1, false} : Signal{};
@@ -144,6 +159,7 @@ bool rtc_sqw_get_raw(int64_t &timestamp, uint32_t &count) {
   return timestamp != 0;
 }
 bool rtc_sqw_is_locked() { return sqw_signal.locked; }
+#endif
 bool pps_is_locked() { return pps_signal.locked; }
 bool pps_get_raw(int64_t &timestamp, uint32_t &count) {
   timestamp = pps_signal.edge_us;

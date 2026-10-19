@@ -169,7 +169,7 @@ const Test kTests[] = {
     {"external_rtc_correction_updates_event_time",
      external_rtc_correction_updates_event_time, "TS006"},
     {"sqw_extra_edge_does_not_add_utc_second",
-     sqw_extra_edge_does_not_add_utc_second, "TS007"},
+     sqw_extra_edge_does_not_add_utc_second},
 };
 } // namespace
 
