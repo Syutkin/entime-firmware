@@ -51,6 +51,65 @@ SUPPORT_SOURCES = {
     "commands/command_router_test.cpp": ("hal_globals.cpp", "command_environment.cpp"),
 }
 DRIVER_GROUPS = {"gps", "rtc", "touch", "battery"}
+GROUP_NAMES = {
+    "timing": "Синхронизация времени",
+    "events": "События и доставка",
+    "settings": "Настройки",
+    "commands": "Команды",
+    "gps": "GPS",
+    "rtc": "RTC",
+    "touch": "Сенсорный экран",
+    "battery": "Батарея",
+}
+STATUSES = ("PASS", "XFAIL", "FAIL", "XPASS", "ERROR")
+
+
+class TestReport:
+    def __init__(self):
+        self.counts: Counter = Counter()
+        self.groups = {}
+        self.selected_suites: Counter = Counter()
+        self.completed_suites: Counter = Counter()
+        self.complete = False
+
+    def write_github_summary(self, args):
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if not summary_path:
+            return
+        lines = ["## Host-тесты по подсистемам", ""]
+        if not self.complete:
+            lines += [
+                "⚠️ Прогон не завершён. Ниже — частичные результаты; "
+                "причина остановки указана в логе шага.", "",
+            ]
+        lines += [
+            f"UBSan: {'включён' if args.sanitize else 'выключен'}. "
+            f"Strict: {'включён' if args.strict else 'выключен'}.", "",
+            "| Группа | Наборы завершены | Сценарии | " + " | ".join(STATUSES) + " |",
+            "| --- | ---: | ---: | " + " | ".join("---:" for _ in STATUSES) + " |",
+        ]
+        ordered_groups = [group for group in GROUP_NAMES if group in self.groups]
+        ordered_groups += sorted(set(self.groups) - set(GROUP_NAMES))
+        for group in ordered_groups:
+            counts = self.groups[group]
+            values = [str(counts[status]) for status in STATUSES]
+            suites = f"{self.completed_suites[group]}/{self.selected_suites[group]}"
+            lines.append(
+                f"| {GROUP_NAMES.get(group, group)} | {suites} | {sum(counts.values())} | "
+                + " | ".join(values) + " |"
+            )
+        values = [str(self.counts[status]) for status in STATUSES]
+        suites = f"{sum(self.completed_suites.values())}/{sum(self.selected_suites.values())}"
+        lines += [
+            f"| **Итого** | **{suites}** | **{sum(self.counts.values())}** | "
+            + " | ".join(values) + " |", "",
+            "XFAIL — известный дефект; XPASS — тест известного дефекта неожиданно прошёл. "
+            "ERROR — авария, ошибка санитайзера или стенда при выполнении сценария.", "",
+        ]
+        if args.strict:
+            lines += ["В strict-режиме XFAIL также приводит к ошибке CI.", ""]
+        with Path(summary_path).open("a", encoding="utf-8") as summary:
+            summary.write("\n".join(lines) + "\n")
 
 
 def main() -> int:
@@ -70,6 +129,14 @@ def main() -> int:
         help="override PlatformIO's libdeps directory (parent of environment folders)",
     )
     args = parser.parse_args()
+    report = TestReport()
+    try:
+        return run_tests(args, parser, report)
+    finally:
+        report.write_github_summary(args)
+
+
+def run_tests(args, parser, report) -> int:
     test_dir = Path(__file__).resolve().parent
     repo_dir = test_dir.parent
     suites = [source for source in sorted((test_dir / "host").glob("**/*_test.cpp"))
@@ -77,7 +144,11 @@ def main() -> int:
     host_dir = test_dir / "host"
     shared = host_dir / "support" / "application"
     compiler = shlex.split(os.environ.get("CXX", "g++"))
-    counts: Counter = Counter()
+    counts = report.counts
+    for source in suites:
+        group = source.relative_to(host_dir).parts[0]
+        report.groups.setdefault(group, Counter())
+        report.selected_suites[group] += 1
     libdeps_dir = (args.libdeps_dir or repo_dir / ".pio" / "libdeps").resolve()
     library_dir = libdeps_dir / args.environment
     arduino_json = library_dir / "ArduinoJson" / "src"
@@ -156,6 +227,7 @@ def main() -> int:
                     # Crashes, sanitizer errors and setup errors are never XFAIL.
                     status = "ERROR"
                 counts[status] += 1
+                report.groups[group][status] += 1
                 marker = f" ({issue})" if known_failure else ""
                 print(f"{status:5} {name}{marker}", flush=True)
                 output = (result.stdout + result.stderr).strip()
@@ -163,9 +235,11 @@ def main() -> int:
                     print(f"      {output}", flush=True)
                 if status == "XPASS":
                     print("      Remove the known_issue marker after reviewing the fix.")
+            report.completed_suites[group] += 1
 
     if not counts:
         parser.error("no matching test cases")
+    report.complete = True
     print("\n" + ", ".join(f"{name}={count}" for name, count in sorted(counts.items())))
     return int(
         bool(counts["FAIL"] or counts["ERROR"] or counts["XPASS"])
