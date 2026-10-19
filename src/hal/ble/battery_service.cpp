@@ -39,13 +39,6 @@ bool BleBatteryService::init(NimBLEServer* server) {
     uint8_t initial = 100;
     _levelChar->setValue(&initial, 1);
     _lastLevel = initial;
-  
-    const bool started = _service->start();
-    if (!started) {
-      ESP_LOGE(TAG, "Battery service start failed");
-      return false;
-    }
-
     return true;
 }
 

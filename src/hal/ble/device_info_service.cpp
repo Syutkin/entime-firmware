@@ -51,5 +51,5 @@ bool BleDeviceInfoService::init(NimBLEServer* server) {
   addReadString(_service, 0x2A27, _hw);           // Hardware Revision
   addReadString(_service, 0x2A28, _sw);           // Software Revision
 
-  return _service->start();
+  return true;
 }

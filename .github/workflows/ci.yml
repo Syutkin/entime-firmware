@@ -41,12 +41,12 @@ jobs:
         id: dependencies
         run: pio pkg update --environment rymcu-esp32-s3-devkitc-1 --no-save
 
+      - name: Build firmware
+        run: pio run --environment rymcu-esp32-s3-devkitc-1
+
       - name: Run host tests
+        # The build installs missing dependencies; still test after compiler errors.
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         env:
           CXX: g++
         run: python3 test/run_host_tests.py --environment rymcu-esp32-s3-devkitc-1 --sanitize --strict
-
-      - name: Build firmware
-        # Known test failures must not hide compiler errors in the firmware.
-        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        run: pio run --environment rymcu-esp32-s3-devkitc-1

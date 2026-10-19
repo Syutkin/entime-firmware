@@ -24,11 +24,11 @@ typedef void (*BLEStateCallback)(BLEState state);
  * @brief Интерфейс BLE-плагина (сервиса).
  *
  * Плагин должен:
- *  - В init(server) создать свой service/characteristics и вызвать
- * service->start()
+ *  - В init(server) создать свой service/characteristics
  *  - НЕ вызывать NimBLEDevice::init(), НЕ стартовать рекламу
  *
  * BLE гарантирует, что init() всех плагинов будет вызван ДО startAdvertising().
+ * При старте advertising NimBLE запускает сервер и все созданные сервисы.
  */
 class IBleServicePlugin {
 public:

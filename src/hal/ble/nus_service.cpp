@@ -87,12 +87,6 @@ bool BleNusService::init(NimBLEServer *server) {
   }
   _txCharacteristic->setCallbacks(&s_nusTxCallbacks);
 
-  if (!_service->start()) {
-    ESP_LOGE(TAG, "NUS service start failed");
-    onBleEnd();
-    return false;
-  }
-
   ESP_LOGI(TAG, "NUS initialized");
   return true;
 }
