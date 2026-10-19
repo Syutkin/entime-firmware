@@ -59,6 +59,27 @@ def main() -> int:
                     extra_sources = [repo_dir / "src" / relative for relative in (
                         "command/command_parser.cpp", "hal/ble/nus_service.cpp",
                     )]
+                elif source.name == "event_timestamp_test.cpp":
+                    extra_sources = [repo_dir / "src" / relative for relative in (
+                        "storage/settings.cpp", "timing/event_timestamp.cpp",
+                        "timing/event_dispatcher.cpp", "timing/event_isr.cpp",
+                        "hal/ble/nus_service.cpp",
+                    )]
+                elif source.name == "event_pipeline_test.cpp":
+                    extra_sources = [repo_dir / "src" / relative for relative in (
+                        "storage/settings.cpp", "timing/event_timestamp.cpp",
+                        "timing/event_dispatcher.cpp", "timing/event_isr.cpp",
+                        "timing/pps_isr.cpp", "timing/rtc_sqw_isr.cpp",
+                        "hal/ble/nus_service.cpp",
+                    )] + [source.parent / "support" / "hal_globals.cpp"]
+                elif source.name == "command_router_test.cpp":
+                    extra_sources = [repo_dir / "src" / relative for relative in (
+                        "storage/settings.cpp", "command/handlers.cpp",
+                        "command/command_parser.cpp", "command/command_router.cpp",
+                        "hal/touch/touch.cpp", "runtime/build_info.cpp",
+                    )] + [source.parent / "support" / name for name in (
+                        "hal_globals.cpp", "command_environment.cpp",
+                    )]
             command += [
                 f"-I{test_dir / 'host' / 'stubs'}", f"-I{repo_dir / 'src'}",
             ]

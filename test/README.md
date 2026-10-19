@@ -29,6 +29,10 @@ test/
       config_command_test.cpp
       command_parser_test.cpp
       ble_delivery_test.cpp
+      event_pipeline_test.cpp   # GPIO → настоящая синхронизация → пакет
+      event_timestamp_test.cpp  # локальное время, START-поправка, формат пакетов
+      settings_validation_test.cpp # частичные обновления, валидация и атомарность
+      command_router_test.cpp   # настоящий парсер → роутер → обработчики
       stubs/                    # отдельные модели периферии для этих наборов
     timing/
       time_sync_nominal_test.cpp # штатные режимы и переходы
@@ -208,6 +212,40 @@ python3 test/run_host_tests.py --sanitize --suite rtc_trust_loss
 `--suite` отбирает пути наборов до компиляции, `--filter` — имена сценариев.
 Известные дефекты имеют маркеры `AUxxx`: обычный запуск допускает `XFAIL`,
 а существующий CI с `--strict` завершится ошибкой, пока эти замечания актуальны.
+
+## Внутреннее поведение: группы 1–4
+
+| Набор | Сценарии |
+| --- | --- |
+| `event_pipeline_test.cpp` | 21: настоящие GPIO ISR события/PPS/SQW, `time_sync`, formatter, dispatcher и NUS. GPS/RTC, оба режима `auto_sync`, START/FINISH, смена источника после захвата, новый PPS до обработки, получение UTC после захвата, отсутствие UTC, границы deadtime 100 мс и START-фильтра 2 с, однократное потребление, сохранение первой метки в single-slot, uptime после rollover `millis()` |
+| `event_timestamp_test.cpp` | 45: независимые ожидаемые строки и пакеты, усечение микросекунд до миллисекунд, выбор ближайшей минуты и tie на 30 с, границы поправки ±15 с, предыдущая/следующая минута и сутки, timezone −720/+840 и дробные часы, отрицательный остаток `timeval`, FINISH без поправки, BEEP/VOICE |
+| `settings_validation_test.cpp` | 43: границы и типы JSON, частичное обновление, сохранение пропущенных полей, откат всех групп при поздней ошибке, явное сохранение, отсутствие повторных NVS-записей, полный roundtrip, defaults для отсутствующих ключей и сброс невалидной сохранённой конфигурации |
+| `command_router_test.cpp` | 66: настоящий parser/router/handlers, ID и ошибки протокола, отсутствие побочных действий при отказе, конфигурация и reboot policy, UTC/source/accuracy, Wi-Fi credentials/start/stop, sync policy, ошибки/результат RTC-калибровки и NTP, результаты touch flow, отложенный reset и переиспользование таймера, status |
+
+В pipeline используется настоящий `SettingsManager`; GPS/NMEA и RTC/I²C
+задаются моделями. UTC привязан к фиксированной дате 2024-01-01, ожидаемые
+пакеты заданы независимо от возвращённой прошивкой строки. System time и
+микросекундный таймер подменены; часы компьютера не изменяются.
+
+В наборе команд моделируются HAL, результат синхронизации/NTP, touch calibration
+flow и API таймера. Проверяются выбор вызовов, переданные параметры, изменение
+состояния и ответы команды. Работа самого `time_sync` проверяется pipeline и
+timing-наборами; радио, I²C, NTP-сеть и экран калибровки здесь не исполняются.
+Callback перезагрузки вызывает модель `esp_restart`, без перезагрузки компьютера.
+
+Дополнительные открытые замечания:
+
+| ID | Проверяемое ожидание |
+| --- | --- |
+| AU009 | JSON-конфигурация должна проверять типы/диапазоны до преобразования: строки/числа вместо bool, неверные типы групп и элементов калибровки, `timezone_offset_min=32768`, `sync.source=256` сейчас принимаются |
+| AU010 | При отказе создания или запуска reset-таймера `factory_reset` должен отвечать ошибкой; сейчас `status: ok` отправляется до проверки таймера |
+
+```bash
+python3 test/run_host_tests.py --sanitize --strict --suite event_pipeline
+python3 test/run_host_tests.py --sanitize --strict --suite event_timestamp
+python3 test/run_host_tests.py --sanitize --suite settings_validation
+python3 test/run_host_tests.py --sanitize --suite command_router
+```
 
 ## Результаты и исправление дефектов
 

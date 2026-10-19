@@ -5,6 +5,8 @@
 
 namespace host_project {
 inline uint32_t now_ms = 0;
+// Negative selects the millisecond clock used by the original project suites.
+inline int64_t precise_us = -1;
 struct MemoryStream : Stream {
   std::deque<uint8_t> input;
   std::string output;

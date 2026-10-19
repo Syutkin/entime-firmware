@@ -10,6 +10,7 @@ inline bool clear_fails = false;
 inline std::string failing_key;
 inline unsigned failed_writes = 0;
 inline unsigned failed_clears = 0;
+inline unsigned successful_writes = 0;
 }
 class Preferences {
 public:
@@ -32,6 +33,7 @@ public:
       return 0;
     }
     host_project::nvs[key] = static_cast<const std::string &>(value);
+    ++host_project::successful_writes;
     return value.size();
   }
   template<typename T> T get(const char *key, T def) const {
@@ -42,7 +44,7 @@ public:
       ++host_project::failed_writes;
       return 0;
     }
-    host_project::nvs[key] = value; return sizeof(T);
+    host_project::nvs[key] = value; ++host_project::successful_writes; return sizeof(T);
   }
   bool getBool(const char *k, bool d) const { return get(k,d); }
   uint8_t getUChar(const char *k, uint8_t d) const { return get(k,d); }
