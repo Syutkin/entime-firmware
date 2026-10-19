@@ -17,10 +17,12 @@ def main() -> int:
         "--strict", action="store_true", help="fail on known issues as well"
     )
     parser.add_argument("--filter", default="", help="run names containing this text")
+    parser.add_argument("--suite", default="", help="build suite paths containing this text")
     args = parser.parse_args()
     test_dir = Path(__file__).resolve().parent
     repo_dir = test_dir.parent
-    suites = sorted((test_dir / "host").glob("**/*_test.cpp"))
+    suites = [source for source in sorted((test_dir / "host").glob("**/*_test.cpp"))
+              if args.suite in str(source.relative_to(test_dir))]
     compiler = shlex.split(os.environ.get("CXX", "g++"))
     counts: Counter = Counter()
 
@@ -30,11 +32,41 @@ def main() -> int:
             executable = Path(build_dir) / f"suite-{index}"
             command = compiler + [
                 "-std=c++17", "-O1", "-g", "-Wall", "-Wextra",
+            ]
+            extra_sources = []
+            if source.parent.name == "project":
+                # Keep broader Arduino/HAL doubles isolated from timing suites.
+                command += [
+                    f"-I{source.parent / 'stubs'}",
+                    "-isystem", str(test_dir / "vendor" / "ArduinoJson" / "src"),
+                    "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections",
+                ]
+                if source.name == "config_command_test.cpp":
+                    extra_sources = [
+                        repo_dir / "src" / relative for relative in (
+                            "storage/settings.cpp", "command/handlers.cpp",
+                            "hal/touch/touch.cpp",
+                        )
+                    ]
+                elif source.name == "ble_delivery_test.cpp":
+                    extra_sources = [
+                        repo_dir / "src" / relative for relative in (
+                            "hal/ble/nus_service.cpp", "timing/event_isr.cpp",
+                            "timing/event_dispatcher.cpp", "timing/event_timestamp.cpp",
+                        )
+                    ]
+                elif source.name == "command_parser_test.cpp":
+                    extra_sources = [repo_dir / "src" / relative for relative in (
+                        "command/command_parser.cpp", "hal/ble/nus_service.cpp",
+                    )]
+            command += [
                 f"-I{test_dir / 'host' / 'stubs'}", f"-I{repo_dir / 'src'}",
             ]
+            if source.parent.name == "project":
+                extra_sources.append(source.parent / "clock.cpp")
             if args.sanitize:
                 command += ["-fsanitize=undefined", "-fno-sanitize-recover=all"]
-            command += [str(source), "-o", str(executable)]
+            command += [str(source), *map(str, extra_sources), "-o", str(executable)]
             print(f"BUILD {source.relative_to(repo_dir)}", flush=True)
             subprocess.run(command, check=True, timeout=120)
             listing = subprocess.run(
