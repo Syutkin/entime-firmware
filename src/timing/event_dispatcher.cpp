@@ -24,7 +24,7 @@ static void sendEventPacket(const EventTimestampData &data) {
   if (!data.success)
     return;
 
-  char packet[40];
+  char packet[BleNusService::kMaxPendingPacketSize];
   int len = 0;
 
   if (data.module_type == ModuleType::START) {
@@ -47,14 +47,21 @@ static void sendEventPacket(const EventTimestampData &data) {
 
   size_t send_len =
       (len < (int)sizeof(packet)) ? (size_t)len : (sizeof(packet) - 1);
+  // Вызывается только после освобождения pending slot в dispatcher.
+  if (!nusService.queuePacket(reinterpret_cast<const uint8_t *>(packet), send_len))
+    return;
   Serial.write(packet, send_len);
-  nusService.write((const uint8_t *)packet, send_len);
+  nusService.sendPendingPacket();
 }
 
 void event_dispatcher_handle_event_isr(ModuleType module_type,
                                        MainArea &mainArea) {
   static int64_t last_start_event_us = 0;
   int64_t t_esp_us = 0;
+
+  // Пока пакет не принят BLE, следующий timestamp сохраняется в ISR slot.
+  if (!nusService.sendPendingPacket())
+    return;
 
   if (event_isr_get(t_esp_us)) {
     if (module_type == ModuleType::START) {

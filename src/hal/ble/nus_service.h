@@ -1,6 +1,7 @@
 #pragma once
 
 #include <NimBLEDevice.h>
+#include <atomic>
 
 #include "ble.h"
 #include "freertos/FreeRTOS.h"
@@ -17,6 +18,11 @@ public:
 
   bool isConnected() const;
 
+  // Один надежный пакет в RAM; остальные записи сначала завершают его отправку.
+  static constexpr size_t kMaxPendingPacketSize = 40;
+  bool queuePacket(const uint8_t *buffer, size_t size);
+  bool sendPendingPacket();
+
   // Stream
   int available() override;
   int read() override;
@@ -30,6 +36,12 @@ public:
   void onNotifyStateChanged(bool enabled);
 
 private:
+  size_t writeDirect_(const uint8_t *buffer, size_t size);
+  uint8_t _pendingPacket[kMaxPendingPacketSize]{};
+  size_t _pendingSize = 0;
+  size_t _pendingSent = 0;
+  uint32_t _pendingConnection = 0;
+
   NimBLEService *_service = nullptr;
   NimBLECharacteristic *_rxCharacteristic = nullptr;
   NimBLECharacteristic *_txCharacteristic = nullptr;
@@ -40,6 +52,7 @@ private:
 
   bool _connected = false;
   bool _notifyEnabled = false;
+  std::atomic<uint32_t> _connectionGeneration{0};
   uint16_t _mtu = 23;
 };
 

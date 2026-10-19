@@ -66,8 +66,10 @@ template <bool Partial> void exhausted_retries_preserve_event() {
     event_dispatcher_handle_event_isr(Partial ? ModuleType::START : ModuleType::FINISH,
                                       area);
   }
-  expect(host_project::delivered.find(packet) != std::string::npos,
-         "AU002: event must remain available for complete delivery after BLE recovers");
+  expect(host_project::delivered == packet,
+         "event must remain available for complete delivery after BLE recovers");
+  expect(Serial.output == packet && area.displayed == 1,
+         "retries must not repeat Serial output or UI updates");
 }
 
 void subscription_gap_preserves_event() {
@@ -81,7 +83,136 @@ void subscription_gap_preserves_event() {
     event_dispatcher_handle_event_isr(ModuleType::FINISH, area);
   }
   expect(host_project::delivered == packet,
-         "AU002: subscription recovery must deliver the pending event");
+         "subscription recovery must deliver the pending event");
+}
+
+void disconnected_event_reaches_next_client() {
+  NimBLEServer server; connect(server); MainArea area;
+  nusService.onDisconnect(0);
+  const auto packet = capture_event(ModuleType::FINISH, area);
+  require(host_project::delivered.empty(), "offline event must remain pending");
+  NimBLEConnInfo client;
+  nusService.onConnect(client, 23);
+  nusService.onNotifyStateChanged(true);
+  event_dispatcher_handle_event_isr(ModuleType::FINISH, area);
+  expect(host_project::delivered == packet && area.displayed == 1,
+         "reconnection must deliver the retained event exactly once");
+}
+
+void partial_packet_restarts_for_new_client() {
+  NimBLEServer server; connect(server); MainArea area;
+  host_project::notify_succeeds = false;
+  host_project::notify_results = {true};
+  const auto packet = capture_event(ModuleType::START, area);
+  require(!host_project::delivered.empty() && host_project::delivered.size() < packet.size(),
+          "old client must receive only the first fragment");
+  nusService.onDisconnect(0);
+  NimBLEConnInfo client;
+  nusService.onConnect(client, 23);
+  nusService.onNotifyStateChanged(true);
+  host_project::delivered.clear(); // New client has no bytes from the old session.
+  host_project::notify_succeeds = true;
+  event_dispatcher_handle_event_isr(ModuleType::START, area);
+  expect(host_project::delivered == packet && area.displayed == 1,
+         "new client must receive the whole event, including its prefix");
+}
+
+void pending_event_keeps_next_capture() {
+  NimBLEServer server; connect(server); MainArea area;
+  host_project::notify_succeeds = false;
+  const auto first = capture_event(ModuleType::FINISH, area);
+  host_project::now_ms += 200;
+  host::fire_gpio(kEventPin);
+  event_dispatcher_handle_event_isr(ModuleType::FINISH, area);
+  expect(area.displayed == 1 && Serial.output == first,
+         "pending packet must not be overwritten by the next capture");
+  host_project::notify_succeeds = true;
+  event_dispatcher_handle_event_isr(ModuleType::FINISH, area);
+  expect(area.displayed == 2 && host_project::delivered == Serial.output &&
+             host_project::delivered.size() == first.size() * 2 &&
+             host_project::delivered.substr(0, first.size()) == first,
+         "both retained events must be delivered in capture order");
+  const auto delivered = host_project::delivered;
+  event_dispatcher_handle_event_isr(ModuleType::FINISH, area);
+  expect(host_project::delivered == delivered && area.displayed == 2,
+         "polling must not repeat completed events");
+}
+
+void partial_packet_resumes_after_mtu_change() {
+  NimBLEServer server; connect(server); MainArea area;
+  host_project::notify_succeeds = false;
+  host_project::notify_results = {true};
+  const auto packet = capture_event(ModuleType::START, area);
+  nusService.onMtuUpdated(100);
+  host_project::notify_succeeds = true;
+  event_dispatcher_handle_event_isr(ModuleType::START, area);
+  expect(host_project::delivered == packet,
+         "MTU change must preserve the byte offset of a pending event");
+}
+
+void pending_packet_precedes_command_reply() {
+  NimBLEServer server; connect(server); MainArea area;
+  host_project::notify_succeeds = false;
+  host_project::notify_results = {true};
+  const auto packet = capture_event(ModuleType::START, area);
+  require(!host_project::delivered.empty() && host_project::delivered.size() < packet.size(),
+          "event must remain partially sent before the command reply");
+  const std::string reply = "{\"status\":\"ok\"}\n";
+  expect(nusService.write(reinterpret_cast<const uint8_t *>(reply.data()), reply.size()) == 0,
+         "blocked event must prevent interleaving a reply into its bytes");
+  host_project::notify_succeeds = true;
+  expect(nusService.write(reinterpret_cast<const uint8_t *>(reply.data()), reply.size()) == reply.size(),
+         "recovered connection must accept the command reply");
+  expect(host_project::delivered == packet + reply,
+         "pending event must finish before any reply bytes are written");
+  event_dispatcher_handle_event_isr(ModuleType::START, area);
+  expect(host_project::delivered == packet + reply && area.displayed == 1,
+         "dispatcher must not resend the event completed by another write");
+}
+
+void reconnect_during_notify_restarts_packet() {
+  NimBLEServer server; connect(server); MainArea area;
+  host_project::after_notify = [] {
+    nusService.onDisconnect(0);
+    NimBLEConnInfo client;
+    nusService.onConnect(client, 23);
+    nusService.onNotifyStateChanged(true);
+    host_project::delivered.clear();
+    host_project::after_notify = nullptr;
+  };
+  const auto packet = capture_event(ModuleType::START, area);
+  event_dispatcher_handle_event_isr(ModuleType::START, area);
+  expect(host_project::delivered == packet && area.displayed == 1,
+         "connection change during notify must retain the whole packet for the new client");
+}
+
+void partial_packet_survives_subscription_gap() {
+  NimBLEServer server; connect(server); MainArea area;
+  host_project::notify_succeeds = false;
+  host_project::notify_results = {true};
+  const auto packet = capture_event(ModuleType::START, area);
+  nusService.onNotifyStateChanged(false);
+  event_dispatcher_handle_event_isr(ModuleType::START, area);
+  host_project::notify_succeeds = true;
+  nusService.onNotifyStateChanged(true);
+  event_dispatcher_handle_event_isr(ModuleType::START, area);
+  expect(host_project::delivered == packet && area.displayed == 1,
+         "subscription pause in the same connection must resume without duplicate bytes");
+}
+
+void pending_packet_survives_ble_restart() {
+  NimBLEServer server; connect(server); MainArea area;
+  host_project::notify_succeeds = false;
+  const auto packet = capture_event(ModuleType::FINISH, area);
+  nusService.onBleEnd();
+  require(nusService.init(&server), "BLE service must restart");
+  NimBLEConnInfo client;
+  nusService.onConnect(client, 23);
+  nusService.onNotifyStateChanged(true);
+  host_project::notify_succeeds = true;
+  event_dispatcher_handle_event_isr(ModuleType::FINISH, area);
+  expect(host_project::delivered == packet && area.displayed == 1,
+         "BLE lifecycle restart must preserve an event awaiting transmission");
 }
 
 void mtu_fragmentation_preserves_bytes() {
@@ -93,11 +224,19 @@ void mtu_fragmentation_preserves_bytes() {
 }
 
 const Test kTests[] = {
+  {"ble_reconnect_during_notify_restarts_packet", reconnect_during_notify_restarts_packet},
+  {"ble_partial_packet_survives_subscription_gap", partial_packet_survives_subscription_gap},
+  {"ble_pending_packet_survives_ble_restart", pending_packet_survives_ble_restart},
+  {"ble_pending_packet_precedes_command_reply", pending_packet_precedes_command_reply},
+  {"ble_disconnected_event_reaches_next_client", disconnected_event_reaches_next_client},
+  {"ble_partial_packet_restarts_for_new_client", partial_packet_restarts_for_new_client},
+  {"ble_pending_event_keeps_next_capture", pending_event_keeps_next_capture},
+  {"ble_partial_packet_resumes_after_mtu_change", partial_packet_resumes_after_mtu_change},
   {"ble_event_delivery_control", successful_event_delivery},
   {"ble_transient_backpressure_control", transient_backpressure_delivers_once},
-  {"ble_exhausted_retries_preserve_event", exhausted_retries_preserve_event<false>, "AU002"},
-  {"ble_partial_packet_is_recoverable", exhausted_retries_preserve_event<true>, "AU002"},
-  {"ble_subscription_gap_preserves_event", subscription_gap_preserves_event, "AU002"},
+  {"ble_exhausted_retries_preserve_event", exhausted_retries_preserve_event<false>},
+  {"ble_partial_packet_is_recoverable", exhausted_retries_preserve_event<true>},
+  {"ble_subscription_gap_preserves_event", subscription_gap_preserves_event},
   {"ble_mtu_fragmentation_control", mtu_fragmentation_preserves_bytes},
 };
 } // namespace

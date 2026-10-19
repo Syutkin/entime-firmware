@@ -92,6 +92,7 @@ bool BleNusService::init(NimBLEServer *server) {
 }
 
 void BleNusService::onConnect(NimBLEConnInfo & /*connInfo*/, uint16_t mtu) {
+  _connectionGeneration.fetch_add(1, std::memory_order_relaxed);
   _connected = true;
   _notifyEnabled = false;
   _mtu = mtu;
@@ -171,6 +172,46 @@ void BleNusService::flush() {
 size_t BleNusService::write(uint8_t c) { return write(&c, 1); }
 
 size_t BleNusService::write(const uint8_t *buffer, size_t size) {
+  if (!sendPendingPacket())
+    return 0;
+  return writeDirect_(buffer, size);
+}
+
+bool BleNusService::queuePacket(const uint8_t *buffer, size_t size) {
+  if (_pendingSize != 0 || !buffer || size == 0 || size > kMaxPendingPacketSize)
+    return false;
+  std::copy_n(buffer, size, _pendingPacket);
+  _pendingSize = size;
+  _pendingSent = 0;
+  _pendingConnection = _connectionGeneration.load(std::memory_order_relaxed);
+  return true;
+}
+
+bool BleNusService::sendPendingPacket() {
+  if (_pendingSize == 0)
+    return true;
+
+  const uint32_t connection = _connectionGeneration.load(std::memory_order_relaxed);
+  if (connection != _pendingConnection) {
+    // Новый клиент не получал начало пакета предыдущего подключения.
+    _pendingConnection = connection;
+    _pendingSent = 0;
+  }
+  _pendingSent += writeDirect_(_pendingPacket + _pendingSent,
+                               _pendingSize - _pendingSent);
+  if (_connectionGeneration.load(std::memory_order_relaxed) != connection) {
+    _pendingSent = 0;
+    return false;
+  }
+  if (_pendingSent != _pendingSize)
+    return false;
+
+  _pendingSize = 0;
+  _pendingSent = 0;
+  return true;
+}
+
+size_t BleNusService::writeDirect_(const uint8_t *buffer, size_t size) {
   if (!_connected || !_txCharacteristic || !_notifyEnabled || !buffer ||
       size == 0) {
     return 0;
@@ -179,8 +220,12 @@ size_t BleNusService::write(const uint8_t *buffer, size_t size) {
   const size_t maxChunk = (_mtu > 3) ? (_mtu - 3) : 20;
   const int maxRetries = 50;
   size_t sent = 0;
+  const uint32_t connection = _connectionGeneration.load(std::memory_order_relaxed);
 
   while (sent < size) {
+    if (!_connected || !_notifyEnabled ||
+        _connectionGeneration.load(std::memory_order_relaxed) != connection)
+      return sent;
     size_t chunk = std::min(maxChunk, size - sent);
     _txCharacteristic->setValue(buffer + sent, chunk);
 
@@ -203,7 +248,8 @@ size_t BleNusService::write(const uint8_t *buffer, size_t size) {
         vTaskDelay(pdMS_TO_TICKS(8));
       }
 
-      if (!_connected || !_notifyEnabled)
+      if (!_connected || !_notifyEnabled ||
+          _connectionGeneration.load(std::memory_order_relaxed) != connection)
         return sent;
     }
 

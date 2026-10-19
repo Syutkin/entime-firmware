@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -10,6 +11,7 @@ inline bool notify_succeeds = true;
 inline unsigned notify_calls = 0;
 inline std::deque<bool> notify_results;
 inline std::string delivered;
+inline std::function<void()> after_notify;
 }
 class NimBLECharacteristic;
 class NimBLEConnInfo {};
@@ -41,6 +43,8 @@ public:
       host_project::notify_results.pop_front();
     }
     if (ok) host_project::delivered += value;
+    const auto callback = host_project::after_notify;
+    if (callback) callback();
     return ok;
   }
 };
