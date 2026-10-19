@@ -800,26 +800,35 @@ void cmdFactoryReset(JsonDocument& request, Stream& output) {
     response["message"] = "Device will reset in 2 seconds";
     response["status"] = "ok";
 
-    sendResponse(response, output, true);
-
     static esp_timer_handle_t reset_timer = nullptr;
     if (reset_timer == nullptr) {
         esp_timer_create_args_t timer_args = {};
         timer_args.callback = [](void*) { esp_restart(); };
         timer_args.name = "factory_reset";
-        if (esp_timer_create(&timer_args, &reset_timer) != ESP_OK) {
+        esp_timer_handle_t new_timer = nullptr;
+        if (esp_timer_create(&timer_args, &new_timer) != ESP_OK) {
+            sendError("factory_reset", 202, "Failed to create reset timer", request["id"], output);
             ESP_LOGE(TAG, "Failed to create reset timer");
             return;
         }
+        reset_timer = new_timer;
     } else if (esp_timer_is_active(reset_timer)) {
-        esp_timer_stop(reset_timer);
+        const esp_err_t stop_result = esp_timer_stop(reset_timer);
+        // Таймер мог истечь между проверкой активности и остановкой.
+        if (stop_result != ESP_OK && stop_result != ESP_ERR_INVALID_STATE) {
+            sendError("factory_reset", 202, "Failed to stop reset timer", request["id"], output);
+            ESP_LOGE(TAG, "Failed to stop reset timer");
+            return;
+        }
     }
 
     if (esp_timer_start_once(reset_timer, 2000000) != ESP_OK) {
+        sendError("factory_reset", 202, "Failed to start reset timer", request["id"], output);
         ESP_LOGE(TAG, "Failed to start reset timer");
         return;
     }
 
+    sendResponse(response, output, true);
     ESP_LOGI(TAG, "Factory_reset completed, scheduled reboot in 2 seconds");
 }
 

@@ -14,10 +14,14 @@ esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle
 }
 bool esp_timer_is_active(esp_timer_handle_t) { return host_project::timer.active; }
 esp_err_t esp_timer_stop(esp_timer_handle_t) {
-  ++host_project::timer.stops; host_project::timer.active = false; return ESP_OK;
+  auto &timer = host_project::timer; ++timer.stops;
+  if (timer.stop_result == ESP_OK || timer.stop_result == ESP_ERR_INVALID_STATE)
+    timer.active = false;
+  return timer.stop_result;
 }
 esp_err_t esp_timer_start_once(esp_timer_handle_t, uint64_t delay) {
   auto &timer = host_project::timer; ++timer.starts;
+  if (timer.before_start) timer.before_start();
   if (!timer.start_ok) return -1;
   timer.delay_us = delay; timer.active = true; return ESP_OK;
 }

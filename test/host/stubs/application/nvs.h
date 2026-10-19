@@ -3,6 +3,7 @@
 #include "Preferences.h"
 using esp_err_t = int;
 constexpr int ESP_OK = 0;
+constexpr int ESP_ERR_INVALID_STATE = 0x103;
 using nvs_handle_t = unsigned;
 constexpr int NVS_READWRITE = 1;
 namespace host_project {

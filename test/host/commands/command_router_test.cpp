@@ -230,14 +230,79 @@ void reset_schedules_and_reuses_timer() {
 }
 template <bool Creation> void failed_reset_timer_is_reported() {
   seed(); host_project::timer.create_ok = !Creation; host_project::timer.start_ok = Creation;
-  auto response = request(R"({"cmd":"factory_reset"})");
+  auto response = request(R"({"cmd":"factory_reset","id":17})");
   require(Creation ? host_project::timer.creates == 1 : host_project::timer.starts == 1,
           "selected timer failure must actually be exercised");
-  expect(response["status"] == "error" && response["error_code"].is<int>() &&
-             response["error_code"].as<int>() > 0,
+  expect(response["status"] == "error" && response["error_code"] == 202 && response["id"] == 17 &&
+             response["cmd"] == "factory_reset" && response["message"].isNull(),
          "timer failure must be reported as a protocol error, not successful reset");
   expect(!host_project::timer.active && host_project::timer.restarts == 0,
          "failed timer must not claim a pending reboot");
+}
+
+template <bool Creation> void failed_timer_request_can_retry() {
+  seed(); host_project::timer.create_ok = !Creation; host_project::timer.start_ok = Creation;
+  error(request(R"({"cmd":"factory_reset","id":17})"), 202);
+  host_project::timer.create_ok = true; host_project::timer.start_ok = true;
+  auto response = request(R"({"cmd":"factory_reset","id":18})");
+  expect(response["status"] == "ok" && response["id"] == 18 &&
+             host_project::timer.creates == (Creation ? 2U : 1U) &&
+             host_project::timer.starts == (Creation ? 1U : 2U) &&
+             host_project::timer.active && host_project::timer.delay_us == 2000000 &&
+             host_project::timer.restarts == 0,
+         "retry must create or reuse a timer and schedule reboot only after success");
+}
+
+void inactive_reset_timer_is_reused() {
+  seed(); require(request(R"({"cmd":"factory_reset"})")["status"] == "ok", "first reset must succeed");
+  host_project::timer.active = false;
+  auto response = request(R"({"cmd":"factory_reset"})");
+  expect(response["status"] == "ok" && host_project::timer.creates == 1 &&
+             host_project::timer.starts == 2 && host_project::timer.stops == 0,
+         "existing inactive timer must restart without an unnecessary stop");
+}
+
+void failed_reset_timer_stop_is_reported_and_can_retry() {
+  seed(); require(request(R"({"cmd":"factory_reset"})")["status"] == "ok", "first reset must succeed");
+  host_project::timer.stop_result = -1;
+  auto response = request(R"({"cmd":"factory_reset","id":17})");
+  error(response, 202);
+  expect(response["id"] == 17 && response["message"].isNull() &&
+             host_project::timer.stops == 1 && host_project::timer.starts == 1 &&
+             host_project::timer.active,
+         "failed stop must leave the previously scheduled timer without starting another deadline");
+  host_project::timer.stop_result = ESP_OK;
+  response = request(R"({"cmd":"factory_reset","id":18})");
+  expect(response["status"] == "ok" && response["id"] == 18 &&
+             host_project::timer.creates == 1 && host_project::timer.starts == 2 &&
+             host_project::timer.stops == 2,
+         "a later reset must recover after a stop failure");
+}
+
+void reset_timer_expired_before_stop_can_restart() {
+  seed(); require(request(R"({"cmd":"factory_reset"})")["status"] == "ok", "first reset must succeed");
+  host_project::timer.stop_result = ESP_ERR_INVALID_STATE;
+  auto response = request(R"({"cmd":"factory_reset"})");
+  expect(response["status"] == "ok" && host_project::timer.creates == 1 &&
+             host_project::timer.stops == 1 && host_project::timer.starts == 2 &&
+             host_project::timer.active,
+         "expiry between the active check and stop must not prevent restarting the timer");
+}
+
+void reset_success_response_follows_timer_start() {
+  seed(); host_project::MemoryStream stream;
+  CommandParser parser(stream, "Serial");
+  bool observed_start = false;
+  host_project::timer.before_start = [&] {
+    observed_start = true;
+    expect(stream.output.empty(), "no successful response may precede timer startup");
+  };
+  stream.feed(R"({"cmd":"factory_reset","id":17})" "\n"); parser.update();
+  JsonDocument response;
+  require(!deserializeJson(response, stream.output), "reset must return valid JSON");
+  expect(observed_start && host_project::timer.active && response["status"] == "ok" &&
+             response["id"] == 17 && stream.output.find('\n') == stream.output.size()-1,
+         "one success response must follow a successfully scheduled reset");
 }
 
 template <unsigned State> void status_mapping() {
@@ -255,6 +320,12 @@ template <unsigned State> void status_mapping() {
 #define BAD(index, label) {"router_reject_" label, rejected_request_has_no_side_effects<index>}
 #define REBOOT(index, label) {"router_reboot_policy_" label, save_reboot_policy<index>}
 const Test kTests[] = {
+  {"router_reset_create_failure_retry", failed_timer_request_can_retry<true>},
+  {"router_reset_start_failure_retry", failed_timer_request_can_retry<false>},
+  {"router_reset_reuses_inactive_timer", inactive_reset_timer_is_reused},
+  {"router_reset_stop_failure_retry", failed_reset_timer_stop_is_reported_and_can_retry},
+  {"router_reset_expired_before_stop", reset_timer_expired_before_stop_can_restart},
+  {"router_reset_success_after_timer_start", reset_success_response_follows_timer_start},
   BAD(0,"missing_cmd"), BAD(1,"numeric_cmd"), BAD(2,"unknown_cmd"),
   BAD(3,"missing_config_data"), BAD(4,"array_config_data"), BAD(5,"invalid_config_value"),
   BAD(6,"missing_wifi_enable"), BAD(7,"non_boolean_wifi_enable"),
@@ -292,8 +363,8 @@ const Test kTests[] = {
   {"router_touch_apply_failure", touch_flow_error_mapping<TouchCalibrationFlowStatus::ApplyFailed,202>},
   {"router_touch_success", touch_flow_success},
   {"router_factory_reset_scheduled", reset_schedules_and_reuses_timer},
-  {"router_reset_timer_create_failure", failed_reset_timer_is_reported<true>, "AU010"},
-  {"router_reset_timer_start_failure", failed_reset_timer_is_reported<false>, "AU010"},
+  {"router_reset_timer_create_failure", failed_reset_timer_is_reported<true>},
+  {"router_reset_timer_start_failure", failed_reset_timer_is_reported<false>},
   {"router_status_wifi_off", status_mapping<0>}, {"router_status_wifi_connecting", status_mapping<1>},
   {"router_status_wifi_connected", status_mapping<2>}, {"router_status_wifi_disconnected", status_mapping<3>},
   {"router_status_wifi_reconnecting", status_mapping<4>}, {"router_status_wifi_error", status_mapping<5>},

@@ -8,6 +8,7 @@
 #include "hal/ina226/ina226.h"
 #include "timing/time_sync.h"
 #include <esp_timer.h>
+#include <functional>
 
 namespace host_project {
 inline TimeSyncStatus sync_status;
@@ -22,9 +23,11 @@ inline uint32_t ntp_timeouts[3]{};
 inline TouchCalibrationFlowResult calibration_result;
 struct TimerModel {
   bool create_ok = true, start_ok = true, active = false;
+  esp_err_t stop_result = ESP_OK;
   unsigned creates = 0, starts = 0, stops = 0, restarts = 0;
   uint64_t delay_us = 0;
   void (*callback)(void *) = nullptr;
+  std::function<void()> before_start;
 };
 inline TimerModel timer;
 } // namespace host_project
