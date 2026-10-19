@@ -31,8 +31,6 @@ jobs:
     name: ESP32-S3 firmware
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    env:
-      PLATFORMIO_VERSION: '6.1.19'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -50,12 +48,15 @@ jobs:
             ~/.platformio/platforms
             ~/.platformio/packages
             .pio/libdeps
-          key: ${{ runner.os }}-pio-${{ env.PLATFORMIO_VERSION }}-${{ hashFiles('platformio.ini', 'scripts/post_compiledb.py') }}
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini', 'scripts/post_compiledb.py') }}
           restore-keys: |
-            ${{ runner.os }}-pio-${{ env.PLATFORMIO_VERSION }}-
+            ${{ runner.os }}-pio-
 
       - name: Install PlatformIO
-        run: python3 -m pip install "platformio==${PLATFORMIO_VERSION}"
+        run: python3 -m pip install --upgrade platformio
+
+      - name: Update PlatformIO dependencies
+        run: pio pkg update --environment rymcu-esp32-s3-devkitc-1 --no-save
 
       - name: Build firmware
         run: pio run --environment rymcu-esp32-s3-devkitc-1

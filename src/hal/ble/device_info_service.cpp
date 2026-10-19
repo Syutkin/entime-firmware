@@ -1,6 +1,6 @@
 #include "device_info_service.h"
 #include "config.h"
-#include <esp_system.h>   // esp_read_mac
+#include <esp_mac.h>
 #include <string.h>
 
 BleDeviceInfoService deviceInfoService;

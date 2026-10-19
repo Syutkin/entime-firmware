@@ -84,5 +84,3 @@ python3 test/run_host_tests.py
 
 Структура и запуск с UBSan описаны в [test/README.md](test/README.md).
 
-GitHub Actions запускает host-тесты с UBSan и `--strict`, а также сборку прошивки
-ESP32-S3 на каждый push и pull request. Workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml).
