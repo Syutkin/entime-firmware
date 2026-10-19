@@ -1089,6 +1089,13 @@ void time_sync_update() {
     notify_state_change_if_needed();
     return;
   }
+  // Запись планируется строго на следующий raw PPS. Любой новый счётчик,
+  // отличный от целевого, означает пропуск цели или сброс счётчика. Отменяем
+  // старую заявку, чтобы на принятом PPS можно было запланировать следующую.
+  // Сравнение на неравенство сохраняет это правило и при uint32_t rollover.
+  if (s_rtc_pps_pending && pps_count != s_rtc_pps_target_count) {
+    s_rtc_pps_pending = false;
+  }
   s_last_pps_count = pps_count;
   PpsSqwSample pps_sqw_sample = log_pps_sqw_delta(pps_time_us, pps_count);
 
@@ -1173,7 +1180,10 @@ void time_sync_update() {
   // RTC ставим на заранее запланированный "следующий PPS", чтобы I2C setTime()
   // соответствовал границе UTC секунды, а не текущему произвольному моменту.
   if (s_rtc_pps_pending && pps_count == s_rtc_pps_target_count) {
-    if (auto_sync_enabled && age_us <= kRtcPpsAlignWindowUs && rtc.isReady()) {
+    // При физическом пропуске PPS счётчик может совпасть с целевым позже:
+    // прежний target_sec тогда уже не соответствует этому фронту.
+    if (auto_sync_enabled && age_us <= kRtcPpsAlignWindowUs && rtc.isReady() &&
+        utc_second == s_rtc_pps_target_sec) {
       rtc.setTime(s_rtc_pps_target_sec);
       ESP_LOGI(TAG, "RTC set from PPS: %lu (aligned, age %lld us)",
                (unsigned long)s_rtc_pps_target_sec, (long long)age_us);

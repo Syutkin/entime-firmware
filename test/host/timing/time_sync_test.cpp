@@ -161,7 +161,7 @@ const Test kTests[] = {
     {"gps_replaces_one_second_holdover_error",
      gps_replaces_one_second_holdover_error},
     {"missed_rtc_write_target_is_rescheduled",
-     missed_rtc_write_target_is_rescheduled, "TS003"},
+     missed_rtc_write_target_is_rescheduled},
     {"rtc_limits_monotonic_clock_drift", rtc_limits_monotonic_clock_drift,
      "TS004"},
     {"rtc_validation_latency_does_not_shift_anchor",
