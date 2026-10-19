@@ -13,6 +13,11 @@ import tempfile
 # Translation units linked with suites that do not include production sources
 # directly. Paths are relative to src/; shared support is configured separately.
 PRODUCTION_SOURCES = {
+    "wifi/wifi_manager_test.cpp": ("hal/wifi/wifi.cpp",),
+    "events/second_events_test.cpp": (
+        "timing/second_events.cpp", "timing/event_dispatcher.cpp",
+        "hal/ble/nus_service.cpp", "storage/settings.cpp",
+    ),
     "events/ble_delivery_test.cpp": (
         "hal/ble/nus_service.cpp", "timing/event_isr.cpp",
         "timing/event_dispatcher.cpp", "timing/event_timestamp.cpp",
@@ -50,7 +55,7 @@ SUPPORT_SOURCES = {
     "events/event_pipeline_test.cpp": ("hal_globals.cpp",),
     "commands/command_router_test.cpp": ("hal_globals.cpp", "command_environment.cpp"),
 }
-DRIVER_GROUPS = {"gps", "rtc", "touch", "battery"}
+DRIVER_GROUPS = {"gps", "rtc", "touch", "battery", "wifi"}
 GROUP_NAMES = {
     "timing": "Синхронизация времени",
     "events": "События и доставка",
@@ -60,6 +65,7 @@ GROUP_NAMES = {
     "rtc": "RTC",
     "touch": "Сенсорный экран",
     "battery": "Батарея",
+    "wifi": "Wi-Fi",
 }
 STATUSES = ("PASS", "XFAIL", "FAIL", "XPASS", "ERROR")
 
