@@ -635,133 +635,119 @@ JsonDocument SettingsManager::toJson() const {
   return doc;
 }
 
-bool SettingsManager::fromJson(const JsonDocument& doc) {
-  // Создать временные структуры и обновить их данными из JSON
+template <typename T>
+static bool checkOptionalJsonType(JsonVariantConst value, const char *field) {
+  if (value.isNull() || value.is<T>())
+    return true;
+  ESP_LOGE(TAG, "Invalid %s: unexpected JSON type or out-of-range value",
+           field);
+  return false;
+}
+
+template <typename T>
+static bool readJsonSetting(JsonVariantConst value, T &target,
+                            const char *field) {
+  // Сохраняем существующую обработку отсутствующих значений и null.
+  if (value.isNull())
+    return true;
+  if (!checkOptionalJsonType<T>(value, field))
+    return false;
+  target = value.as<T>();
+  return true;
+}
+
+bool SettingsManager::fromJson(const JsonDocument &doc) {
+  if (!checkOptionalJsonType<JsonObjectConst>(doc.as<JsonVariantConst>(),
+                                              "settings"))
+    return false;
+  for (const char *group : {"device", "sync", "wifi", "gps", "touch"}) {
+    if (!checkOptionalJsonType<JsonObjectConst>(doc[group], group))
+      return false;
+  }
+
+  // Изменения применяются только после проверки всех групп.
   DeviceSettings device = settings_.device;
   SyncSettings sync = settings_.sync;
   WifiSettings wifi = settings_.wifi;
   GpsSettings gps = settings_.gps;
   TouchSettings touch = settings_.touch;
-  // Device settings
+
   if (!doc["device"].isNull()) {
-    if (!doc["device"]["name"].isNull()) {
-      device.name = doc["device"]["name"].as<String>();
-    }
-    if (!doc["device"]["number"].isNull()) {
-      device.number = doc["device"]["number"].as<uint8_t>();
-    }
-    if (!doc["device"]["type"].isNull()) {
-      device.type = doc["device"]["type"].as<uint8_t>();
-    }
-    if (!doc["device"]["timezone_offset_min"].isNull()) {
-      device.timezone_offset_min =
-          doc["device"]["timezone_offset_min"].as<int16_t>();
-    }
-
-    if (!validateDevice(device)) {
+    if (!readJsonSetting(doc["device"]["name"], device.name, "device.name") ||
+        !readJsonSetting(doc["device"]["number"], device.number,
+                         "device.number") ||
+        !readJsonSetting(doc["device"]["type"], device.type, "device.type") ||
+        !readJsonSetting(doc["device"]["timezone_offset_min"],
+                         device.timezone_offset_min,
+                         "device.timezone_offset_min") ||
+        !validateDevice(device))
       return false;
-    }
   }
 
-  // Sync settings
   if (!doc["sync"].isNull()) {
-    if (!doc["sync"]["auto"].isNull()) {
-      sync.auto_sync = doc["sync"]["auto"].as<bool>();
-    }
-    if (!doc["sync"]["source"].isNull()) {
-      sync.source = doc["sync"]["source"].as<uint8_t>();
-    }
-    if (!doc["sync"]["ntp1"].isNull()) {
-      sync.ntp1 = doc["sync"]["ntp1"].as<String>();
-    }
-    if (!doc["sync"]["ntp2"].isNull()) {
-      sync.ntp2 = doc["sync"]["ntp2"].as<String>();
-    }
-    if (!doc["sync"]["ntp3"].isNull()) {
-      sync.ntp3 = doc["sync"]["ntp3"].as<String>();
-    }
-
-    if (!validateSync(sync)) {
+    if (!readJsonSetting(doc["sync"]["auto"], sync.auto_sync, "sync.auto") ||
+        !readJsonSetting(doc["sync"]["source"], sync.source, "sync.source") ||
+        !readJsonSetting(doc["sync"]["ntp1"], sync.ntp1, "sync.ntp1") ||
+        !readJsonSetting(doc["sync"]["ntp2"], sync.ntp2, "sync.ntp2") ||
+        !readJsonSetting(doc["sync"]["ntp3"], sync.ntp3, "sync.ntp3") ||
+        !validateSync(sync))
       return false;
-    }
   }
 
-  // WiFi settings
   if (!doc["wifi"].isNull()) {
-    if (!doc["wifi"]["active"].isNull()) {
-      wifi.active = doc["wifi"]["active"].as<bool>();
-    }
-    if (!doc["wifi"]["ssid"].isNull()) {
-      wifi.ssid = doc["wifi"]["ssid"].as<String>();
-    }
-    if (!doc["wifi"]["passwd"].isNull()) {
-      wifi.passwd = doc["wifi"]["passwd"].as<String>();
-    }
-
-    if (!validateWifi(wifi)) {
+    if (!readJsonSetting(doc["wifi"]["active"], wifi.active, "wifi.active") ||
+        !readJsonSetting(doc["wifi"]["ssid"], wifi.ssid, "wifi.ssid") ||
+        !readJsonSetting(doc["wifi"]["passwd"], wifi.passwd, "wifi.passwd") ||
+        !validateWifi(wifi))
       return false;
-    }
   }
 
-  // GPS settings
   if (!doc["gps"].isNull()) {
-    if (!doc["gps"]["enabled"].isNull()) {
-      gps.enabled = doc["gps"]["enabled"].as<bool>();
-    }
-
-    if (!validateGps(gps)) {
+    if (!readJsonSetting(doc["gps"]["enabled"], gps.enabled, "gps.enabled") ||
+        !validateGps(gps))
       return false;
-    }
   }
 
-  // Touch settings
   if (!doc["touch"].isNull()) {
-    if (!doc["touch"]["enabled"].isNull()) {
-      touch.enabled = doc["touch"]["enabled"].as<bool>();
-    }
-    if (!doc["touch"]["cal_valid"].isNull()) {
-      touch.calibration.valid = doc["touch"]["cal_valid"].as<bool>();
-    }
+    if (!readJsonSetting(doc["touch"]["enabled"], touch.enabled,
+                         "touch.enabled") ||
+        !readJsonSetting(doc["touch"]["cal_valid"], touch.calibration.valid,
+                         "touch.cal_valid"))
+      return false;
     if (!doc["touch"]["calibration"].isNull()) {
-      if (!doc["touch"]["calibration"].is<JsonArrayConst>()) {
+      if (!checkOptionalJsonType<JsonArrayConst>(doc["touch"]["calibration"],
+                                                 "touch.calibration"))
         return false;
-      }
-      JsonArrayConst cal_array = doc["touch"]["calibration"].as<JsonArrayConst>();
-      if (cal_array.size() != 5) {
+      JsonArrayConst cal_array =
+          doc["touch"]["calibration"].as<JsonArrayConst>();
+      if (cal_array.size() != 5)
         return false;
-      }
-      for (uint8_t i = 0; i < 5; i++) {
+      for (uint8_t i = 0; i < 5; ++i) {
+        if (!checkOptionalJsonType<uint16_t>(cal_array[i], "touch.calibration"))
+          return false;
         touch.calibration.data[i] = cal_array[i].as<uint16_t>();
       }
     } else {
-      if (!doc["touch"]["cal0"].isNull()) {
-        touch.calibration.data[0] = doc["touch"]["cal0"].as<uint16_t>();
-      }
-      if (!doc["touch"]["cal1"].isNull()) {
-        touch.calibration.data[1] = doc["touch"]["cal1"].as<uint16_t>();
-      }
-      if (!doc["touch"]["cal2"].isNull()) {
-        touch.calibration.data[2] = doc["touch"]["cal2"].as<uint16_t>();
-      }
-      if (!doc["touch"]["cal3"].isNull()) {
-        touch.calibration.data[3] = doc["touch"]["cal3"].as<uint16_t>();
-      }
-      if (!doc["touch"]["cal4"].isNull()) {
-        touch.calibration.data[4] = doc["touch"]["cal4"].as<uint16_t>();
-      }
+      if (!readJsonSetting(doc["touch"]["cal0"], touch.calibration.data[0],
+                           "touch.cal0") ||
+          !readJsonSetting(doc["touch"]["cal1"], touch.calibration.data[1],
+                           "touch.cal1") ||
+          !readJsonSetting(doc["touch"]["cal2"], touch.calibration.data[2],
+                           "touch.cal2") ||
+          !readJsonSetting(doc["touch"]["cal3"], touch.calibration.data[3],
+                           "touch.cal3") ||
+          !readJsonSetting(doc["touch"]["cal4"], touch.calibration.data[4],
+                           "touch.cal4"))
+        return false;
     }
-
-    if (!validateTouch(touch)) {
+    if (!validateTouch(touch))
       return false;
-    }
   }
 
-  // Если все валидации прошли - применить изменения
   settings_.device = device;
   settings_.sync = sync;
   settings_.wifi = wifi;
   settings_.gps = gps;
   settings_.touch = touch;
-
   return true;
 }

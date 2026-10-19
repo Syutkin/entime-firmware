@@ -46,6 +46,11 @@ const BadRequest kBad[] = {
   {R"({"cmd":"sync_source","id":17,"source":"invalid"})",103},
   {R"({"cmd":"calibrate","id":17})",102},
   {R"({"cmd":"calibrate","id":17,"offset":"invalid"})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"device":{"number":22},"sync":{"auto":"false"}}})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"device":{"number":22},"touch":[]}})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"sync":{"source":256}}})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"touch":{"calibration":[1,2,"bad",4,5]}}})",103},
+  {R"({"cmd":"save_config","id":17,"data":{"wifi":{"passwd":true}}})",103},
 };
 template <size_t Index> void rejected_request_has_no_side_effects() {
   seed(); const auto before = snapshot(); const auto nvs = host_project::nvs;
@@ -331,6 +336,9 @@ const Test kTests[] = {
   BAD(6,"missing_wifi_enable"), BAD(7,"non_boolean_wifi_enable"),
   BAD(8,"missing_source"), BAD(9,"numeric_source"), BAD(10,"unknown_source"),
   BAD(11,"missing_calibration_offset"), BAD(12,"string_calibration_offset"),
+  BAD(13,"config_boolean_string"), BAD(14,"config_group_array"),
+  BAD(15,"config_integer_overflow"), BAD(16,"config_calibration_string"),
+  BAD(17,"config_password_boolean"),
   {"router_ping_integer_id", ping_preserves_id<0>}, {"router_ping_zero_id", ping_preserves_id<1>},
   {"router_ping_string_id", ping_preserves_id<2>}, {"router_ping_boolean_id", ping_preserves_id<3>},
   {"router_ping_without_id", ping_without_id}, {"router_malformed_json", malformed_json_returns_parser_error},
