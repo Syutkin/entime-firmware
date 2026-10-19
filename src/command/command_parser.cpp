@@ -78,7 +78,7 @@ void CommandParser::update() {
       _discarding = false;
       clearBuffer();
     }
-    while (_stream->available() > 0) {
+    while (_discarding && _stream->available() > 0) {
       int c = _stream->read();
       if (resetIfSessionChanged())
         return;

@@ -35,7 +35,75 @@ template <bool Rollover> void discard_timeout_preserves_next_command() {
   host_project::now_ms += 1500;
   stream.feed(ping); parser.update();
   expect(commands == std::vector<std::string>{"ping"},
-         "AU008: the first valid command after discard timeout must be routed");
+         "the first valid command after discard timeout must be routed");
+}
+
+template <uint32_t Delay, bool Rollover, bool Accepted>
+void discard_timeout_boundary() {
+  host_project::now_ms = Rollover ? UINT32_MAX - 100 : 100;
+  host_project::MemoryStream stream;
+  CommandParser parser(stream, "audit", kFrameSize);
+  overflow(parser, stream);
+  host_project::now_ms += Delay;
+  stream.feed(ping); parser.update();
+  expect(commands.size() == (Accepted ? 1U : 0U),
+         "discard must continue through 1000 ms and expire at 1001 ms");
+  stream.feed(ping); parser.update();
+  expect(commands.size() == (Accepted ? 2U : 1U) && errors == std::vector<int>{104},
+         "the following frame must route normally without another overflow error");
+}
+
+void fragmented_frame_after_discard_timeout() {
+  host_project::MemoryStream stream;
+  CommandParser parser(stream, "audit", kFrameSize);
+  overflow(parser, stream);
+  host_project::now_ms += 1500;
+  stream.feed("{\"cmd\":"); parser.update();
+  expect(commands.empty(), "partial new frame must wait for completion");
+  host_project::now_ms += 750;
+  stream.feed("\"ping\"}\n"); parser.update();
+  expect(commands == std::vector<std::string>{"ping"} && errors == std::vector<int>{104},
+         "new fragmented frame must receive its own timeout after discard recovery");
+}
+
+void queued_frames_after_discard_timeout() {
+  host_project::MemoryStream stream;
+  CommandParser parser(stream, "audit", kFrameSize);
+  overflow(parser, stream);
+  host_project::now_ms += 1001;
+  stream.feed(ping + ping); parser.update();
+  expect(commands == std::vector<std::string>{"ping"},
+         "timeout recovery must process the first queued command exactly once");
+  parser.update();
+  expect(commands == std::vector<std::string>{"ping","ping"} && errors.size() == 1,
+         "second queued command must remain for the next update");
+}
+
+void repeated_discard_timeouts_recover() {
+  host_project::MemoryStream stream;
+  CommandParser parser(stream, "audit", kFrameSize);
+  for (unsigned cycle = 0; cycle < 4; ++cycle) {
+    stream.feed(std::string(kFrameSize, 'x')); parser.update();
+    require(errors.size() == cycle + 1, "each oversized frame must report one error");
+    host_project::now_ms += 1001;
+    stream.feed(ping); parser.update();
+    expect(commands.size() == cycle + 1 && commands.back() == "ping",
+           "every timeout recovery must retain its first correct command");
+  }
+}
+
+void discard_timeout_with_empty_stream() {
+  host_project::MemoryStream stream;
+  CommandParser parser(stream, "audit", kFrameSize);
+  overflow(parser, stream);
+  host_project::now_ms += 1001;
+  parser.update(); parser.update();
+  expect(commands.empty() && errors.size() == 1,
+         "timeout polling without data must not produce commands or extra errors");
+  host_project::now_ms += 500;
+  stream.feed(ping); parser.update();
+  expect(commands == std::vector<std::string>{"ping"},
+         "later input must work after an empty-stream timeout");
 }
 
 void newline_recovers_oversized_frame() {
@@ -298,6 +366,16 @@ void log_preserves_non_secret_fields() {
 }
 
 const Test kTests[] = {
+  {"parser_discard_timeout_before_boundary", discard_timeout_boundary<999,false,false>},
+  {"parser_discard_timeout_at_boundary", discard_timeout_boundary<1000,false,false>},
+  {"parser_discard_timeout_after_boundary", discard_timeout_boundary<1001,false,true>},
+  {"parser_discard_timeout_rollover_before_boundary", discard_timeout_boundary<999,true,false>},
+  {"parser_discard_timeout_rollover_at_boundary", discard_timeout_boundary<1000,true,false>},
+  {"parser_discard_timeout_rollover_after_boundary", discard_timeout_boundary<1001,true,true>},
+  {"parser_discard_timeout_fragmented_new_frame", fragmented_frame_after_discard_timeout},
+  {"parser_discard_timeout_two_queued_frames", queued_frames_after_discard_timeout},
+  {"parser_discard_timeout_repeated_recovery", repeated_discard_timeouts_recover},
+  {"parser_discard_timeout_empty_stream", discard_timeout_with_empty_stream},
   {"ble_reconnect_during_first_command_byte", reconnect_during_command_read_does_not_route_old_frame<false>},
   {"ble_reconnect_during_last_command_byte", reconnect_during_command_read_does_not_route_old_frame<true>},
   {"ble_reconnect_clears_consumed_partial_frame", session_change_clears_parser_state<0,false>},
@@ -309,8 +387,8 @@ const Test kTests[] = {
   {"ble_disconnect_discards_rx_and_offline_input", disconnect_discards_rx_and_rejects_offline_input},
   {"ble_subscription_change_keeps_partial_frame", subscription_change_keeps_same_session_frame},
   {"ble_repeated_reconnect_between_parser_polls", repeated_reconnect_before_polling_clears_old_frame},
-  {"parser_discard_timeout_preserves_command", discard_timeout_preserves_next_command<false>, "AU008"},
-  {"parser_discard_timeout_millis_rollover", discard_timeout_preserves_next_command<true>, "AU008"},
+  {"parser_discard_timeout_preserves_command", discard_timeout_preserves_next_command<false>},
+  {"parser_discard_timeout_millis_rollover", discard_timeout_preserves_next_command<true>},
   {"parser_oversized_newline_recovery_control", newline_recovers_oversized_frame},
   {"parser_partial_timeout_recovery_control", normal_partial_timeout_recovers},
   {"parser_fragmented_command_control", fragmented_command_routes_once},
